@@ -1,0 +1,14 @@
+# ============================================================
+# GitHub Linguist Configuration
+# Menyembunyikan kode bawaan platform agar repositori terdeteksi 100% Dart
+# ============================================================
+
+# Abaikan kode bawaan platform Flutter (C++, CMake, HTML, Swift, Kotlin)
+comicstream_app/windows/** linguist-vendored
+comicstream_app/web/** linguist-vendored
+comicstream_app/android/** linguist-vendored
+comicstream_app/ios/** linguist-vendored
+
+# Abaikan skrip skema SQL & Supabase edge functions dari kalkulasi bahasa
+*.sql linguist-documentation
+supabase/** linguist-vendored
