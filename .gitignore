@@ -22,6 +22,8 @@ build/
 *.iml
 .DS_Store
 
-# Agents
+# Agents & Temp
 .agents/
 scratch/
+*.log
+.temp/

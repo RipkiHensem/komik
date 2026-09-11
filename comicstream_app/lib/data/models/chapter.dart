@@ -1,6 +1,7 @@
+/// Model Chapter yang disesuaikan dengan response dari mangamint API
 class Chapter {
-  final String id;
-  final String comicId;
+  final String id; // endpoint/slug chapter, mis: "solo-leveling-chapter-1"
+  final String comicId; // endpoint/slug comic
   final int chapterNumber;
   final String? title;
   final int pageCount;
@@ -17,12 +18,25 @@ class Chapter {
 
   factory Chapter.fromJson(Map<String, dynamic> json) {
     return Chapter(
-      id: json['id'] as String,
-      comicId: json['comic_id'] as String,
-      chapterNumber: json['chapter_number'] as int,
-      title: json['title'] as String?,
-      pageCount: json['page_count'] as int? ?? 0,
-      releasedAt: DateTime.parse(json['released_at'] as String),
+      id: json['endpoint']?.toString() ?? json['id']?.toString() ?? '',
+      comicId: json['comic_id']?.toString() ?? '',
+      chapterNumber: _parseInt(json['chapter_number']),
+      title: json['title']?.toString(),
+      pageCount: _parseInt(json['page_count']),
+      releasedAt: _parseDate(json['released_at'] ?? json['date']),
+    );
+  }
+
+  factory Chapter.fromSupabase(Map<String, dynamic> json) {
+    return Chapter(
+      id: json['id']?.toString() ?? '',
+      comicId: json['comic_id']?.toString() ?? '',
+      chapterNumber: (json['chapter_number'] as num?)?.toInt() ?? 0,
+      title: json['title']?.toString(),
+      pageCount: (json['page_count'] as num?)?.toInt() ?? 0,
+      releasedAt: json['released_at'] != null
+          ? (DateTime.tryParse(json['released_at'].toString()) ?? DateTime.now())
+          : DateTime.now(),
     );
   }
 
@@ -37,16 +51,31 @@ class Chapter {
     };
   }
 
+  static int _parseInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    return int.tryParse(v.toString().replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
+  }
+
+  static DateTime _parseDate(dynamic v) {
+    if (v == null) return DateTime.now();
+    try {
+      return DateTime.parse(v.toString());
+    } catch (_) {
+      return DateTime.now();
+    }
+  }
+
   /// Display name for the chapter
   String get displayName {
     if (title != null && title!.isNotEmpty) {
-      // Avoid redundant "Chapter 5: Chapter 5" — only show subtitle if it adds info
       final cleanTitle = title!.trim();
-      final chapterPrefix = 'chapter $chapterNumber';
-      if (cleanTitle.toLowerCase() == chapterPrefix ||
-          cleanTitle.toLowerCase() == 'chapter $chapterNumber') {
+      final lower = cleanTitle.toLowerCase();
+      if (lower == 'chapter $chapterNumber' || lower == 'ch. $chapterNumber') {
         return 'Chapter $chapterNumber';
       }
+      // If title already contains chapter number, just show the title
+      if (lower.startsWith('chapter')) return cleanTitle;
       return 'Chapter $chapterNumber: $cleanTitle';
     }
     return 'Chapter $chapterNumber';

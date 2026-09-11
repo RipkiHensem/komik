@@ -21,6 +21,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -32,6 +33,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   Future<void> _handleRegister() async {
+    setState(() => _errorMessage = null);
     if (!_formKey.currentState!.validate()) return;
 
     final success = await ref.read(authProvider.notifier).register(
@@ -44,10 +46,29 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       context.go('/home');
     } else if (mounted) {
       final error = ref.read(authProvider).errorMessage;
+      setState(() {
+        _errorMessage = error ?? 'Registrasi gagal. Silakan coba lagi.';
+      });
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error ?? 'Registrasi gagal'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 4),
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _errorMessage!,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -61,36 +82,91 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Center(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Stack(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: AppColors.divider.withValues(alpha: 0.6),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.35),
-                            blurRadius: 32,
-                            offset: const Offset(0, 10),
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight > 64 ? constraints.maxHeight - 64 : 0,
+                  minWidth: constraints.maxWidth,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        // Ambient glow decorations
+                        Positioned(
+                          top: -30,
+                          child: Container(
+                            width: 280,
+                            height: 280,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primary.withValues(alpha: 0.18),
+                                  blurRadius: 120,
+                                  spreadRadius: 30,
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
+                        ),
+                        Positioned(
+                          bottom: -20,
+                          child: Container(
+                            width: 220,
+                            height: 220,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.secondary.withValues(alpha: 0.10),
+                                  blurRadius: 100,
+                                  spreadRadius: 20,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // Card container
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: AppColors.isDark
+                                  ? Colors.white.withValues(alpha: 0.08)
+                                  : Colors.black.withValues(alpha: 0.08),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: AppColors.isDark ? 0.45 : 0.08),
+                                blurRadius: 40,
+                                offset: const Offset(0, 16),
+                                spreadRadius: -4,
+                              ),
+                              BoxShadow(
+                                color: AppColors.primary.withValues(alpha: 0.06),
+                                blurRadius: 24,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 34),
+                            child: Form(
+                              key: _formKey,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
                             // Logo
                             Center(
                               child: Container(
@@ -134,7 +210,74 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 color: AppColors.textSecondary.withValues(alpha: 0.8),
                               ),
                             ),
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 28),
+
+                            // In-form Error Notification Banner
+                            if (_errorMessage != null) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: AppColors.error.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: AppColors.error.withValues(alpha: 0.45),
+                                    width: 1.2,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Icon(
+                                        Icons.error_outline_rounded,
+                                        color: AppColors.error,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Pendaftaran Gagal',
+                                            style: TextStyle(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppColors.error,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            _errorMessage!,
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              color: AppColors.textPrimary.withValues(alpha: 0.9),
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    InkWell(
+                                      onTap: () => setState(() => _errorMessage = null),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(2),
+                                        child: Icon(
+                                          Icons.close_rounded,
+                                          size: 18,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                            ],
 
                             // Username
                             TextFormField(
@@ -144,6 +287,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 hintText: 'Username',
                                 prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
                               ),
+                              onChanged: (_) {
+                                if (_errorMessage != null) {
+                                  setState(() => _errorMessage = null);
+                                }
+                              },
                               validator: (value) {
                                 if (value == null || value.trim().isEmpty) {
                                   return 'Username tidak boleh kosong';
@@ -347,27 +495,41 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         ),
                       ),
                     ),
+                  ),
 
                     // Top-right close button
                     Positioned(
-                      top: 10,
-                      right: 10,
+                      top: 14,
+                      right: 14,
                       child: HoverWidget(
-                        scale: 1.15,
-                        child: IconButton(
-                          icon: Icon(
-                            Icons.close_rounded,
-                            size: 20,
-                            color: AppColors.textSecondary,
-                          ),
-                          tooltip: 'Tutup',
-                          onPressed: () {
+                        scale: 1.08,
+                        child: InkWell(
+                          onTap: () {
                             if (context.canPop()) {
                               context.pop();
                             } else {
                               context.go('/home');
                             }
                           },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.surface.withValues(alpha: 0.6),
+                              border: Border.all(
+                                color: AppColors.isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.06),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -376,8 +538,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
             ),
           ),
-        ),
-      ),
-    );
+        );
+      },
+    ),
+  ),
+);
   }
 }

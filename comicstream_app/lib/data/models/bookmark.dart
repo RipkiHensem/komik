@@ -1,13 +1,13 @@
+/// Model Bookmark yang disesuaikan dengan Supabase bookmarks table
 class Bookmark {
   final String id;
   final String userId;
-  final String comicId;
-  final String? lastChapterId;
+  final String comicId; // endpoint/slug komik
+  final String? lastChapterId; // endpoint/slug chapter
   final int lastPage;
   final DateTime createdAt;
-  final DateTime updatedAt;
 
-  // Joined data (populated when fetched with comic info)
+  // Data yang opsional (diisi secara manual setelah fetch)
   final String? comicTitle;
   final String? comicCoverUrl;
   final int? lastChapterNumber;
@@ -19,7 +19,6 @@ class Bookmark {
     this.lastChapterId,
     this.lastPage = 1,
     required this.createdAt,
-    required this.updatedAt,
     this.comicTitle,
     this.comicCoverUrl,
     this.lastChapterNumber,
@@ -32,8 +31,9 @@ class Bookmark {
       comicId: json['comic_id'] as String,
       lastChapterId: json['last_chapter_id'] as String?,
       lastPage: json['last_page'] as int? ?? 1,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'] as String)
+          : DateTime.now(),
       comicTitle: json['comic_title'] as String?,
       comicCoverUrl: json['comic_cover_url'] as String?,
       lastChapterNumber: json['last_chapter_number'] as int?,
@@ -48,7 +48,6 @@ class Bookmark {
       'last_chapter_id': lastChapterId,
       'last_page': lastPage,
       'created_at': createdAt.toIso8601String(),
-      'updated_at': updatedAt.toIso8601String(),
     };
   }
 

@@ -1,3 +1,4 @@
+/// Model User yang disesuaikan dengan Supabase Auth + profiles table
 class User {
   final String id;
   final String username;
@@ -13,12 +14,39 @@ class User {
     this.avatarUrl,
   });
 
+  /// Buat dari Supabase user + profile data yang digabung
+  factory User.fromSupabase({
+    required String id,
+    required String email,
+    String? username,
+    String? avatarUrl,
+    dynamic createdAt,
+  }) {
+    DateTime parsedDate;
+    if (createdAt is DateTime) {
+      parsedDate = createdAt;
+    } else if (createdAt is String) {
+      parsedDate = DateTime.tryParse(createdAt) ?? DateTime.now();
+    } else {
+      parsedDate = DateTime.now();
+    }
+    return User(
+      id: id,
+      username: username ?? email.split('@').first,
+      email: email,
+      createdAt: parsedDate,
+      avatarUrl: avatarUrl,
+    );
+  }
+
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
       id: json['id'] as String,
-      username: json['username'] as String,
-      email: json['email'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      username: json['username'] as String? ?? json['email']?.toString().split('@').first ?? '',
+      email: json['email'] as String? ?? '',
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'] as String)
+          : DateTime.now(),
       avatarUrl: json['avatar_url'] as String?,
     );
   }

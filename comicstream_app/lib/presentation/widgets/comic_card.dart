@@ -30,7 +30,8 @@ class _ComicCardState extends State<ComicCard> {
   bool get _isActive => _isHovered || _isPressed;
 
   bool get _isRecentlyUpdated {
-    return DateTime.now().difference(widget.comic.updatedAt).inHours < 24;
+    if (widget.comic.updatedAt == null) return false;
+    return DateTime.now().difference(widget.comic.updatedAt!).inHours < 24;
   }
 
   @override

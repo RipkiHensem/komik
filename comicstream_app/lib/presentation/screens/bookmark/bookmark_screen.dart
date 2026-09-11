@@ -292,7 +292,7 @@ class _BookmarkTab extends ConsumerWidget {
               final bookmark = bookmarks[index];
               return _BookmarkCard(
                 bookmark: bookmark,
-                onDelete: () => ref.read(bookmarksProvider.notifier).removeBookmark(bookmark.id),
+                onDelete: () => ref.read(bookmarksProvider.notifier).removeBookmarkByComicId(bookmark.comicId),
                 onTap: () => context.push('/comic/${bookmark.comicId}'),
                 onContinue: bookmark.lastChapterId != null
                     ? () => context.push('/comic/${bookmark.comicId}/chapter/${bookmark.lastChapterId}')

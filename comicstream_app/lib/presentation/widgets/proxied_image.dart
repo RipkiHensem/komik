@@ -1,9 +1,10 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 
 /// Reusable network image widget that automatically proxies URLs on web
-/// to bypass CORS restrictions.
+/// to bypass CORS restrictions from thumbnail.komiku.org.
 class ProxiedImage extends StatelessWidget {
   final String imageUrl;
   final double? width;
@@ -24,9 +25,30 @@ class ProxiedImage extends StatelessWidget {
     this.errorWidget,
   });
 
+  /// Converts a thumbnail URL to go through our Supabase Edge Function proxy
+  /// on web to bypass CORS. On mobile/desktop, returns the original URL.
+  String get _resolvedUrl {
+    if (imageUrl.isEmpty) return '';
+    // Only proxy on web — mobile & desktop can load directly
+    if (!kIsWeb) return imageUrl;
+    // If already a proxied URL, don't double-proxy
+    if (imageUrl.contains('/img-proxy')) return imageUrl;
+    // On web, external images suffer from CORS restrictions.
+    // Proxy any external http/https image that is not from Supabase.
+    final isExternal = imageUrl.contains('thumbnail.komiku.org') ||
+        imageUrl.contains('komiku.org') ||
+        ((imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) &&
+            !imageUrl.contains('supabase.co'));
+    if (isExternal) {
+      final encoded = Uri.encodeComponent(imageUrl);
+      return '${AppConstants.mangaApiBaseUrl}/img-proxy?url=$encoded';
+    }
+    return imageUrl;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final proxiedUrl = AppConstants.resolveImageUrl(imageUrl);
+    final proxiedUrl = _resolvedUrl;
 
     if (proxiedUrl.isEmpty) {
       return _buildPlaceholder();

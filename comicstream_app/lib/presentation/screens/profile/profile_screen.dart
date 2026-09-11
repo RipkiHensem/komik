@@ -194,13 +194,40 @@ class ProfileScreen extends ConsumerWidget {
                   const SizedBox(height: 10),
 
                   // ── Username ────────────────────────────────────
-                  Text(
-                    user?.username ?? 'Tamu (Guest)',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user?.username ?? 'Tamu (Guest)',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (user != null) ...[
+                        const SizedBox(width: 8),
+                        HoverWidget(
+                          scale: 1.15,
+                          child: InkWell(
+                            onTap: () => _showEditUsernameDialog(context, ref, user),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                Icons.edit_outlined,
+                                size: 18,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -423,6 +450,115 @@ class ProfileScreen extends ConsumerWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditUsernameDialog(BuildContext context, WidgetRef ref, dynamic user) {
+    final initialUsername = user.username.toString();
+    final controller = TextEditingController(text: initialUsername);
+    final formKey = GlobalKey<FormState>();
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(Icons.badge_outlined, color: AppColors.primary, size: 22),
+              const SizedBox(width: 10),
+              Text(
+                'Ubah Username',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Username ini digunakan untuk login dan tampil di profil kamu.',
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: controller,
+                  autofocus: true,
+                  style: TextStyle(color: AppColors.textPrimary),
+                  decoration: const InputDecoration(
+                    hintText: 'Username baru',
+                    prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+                  ),
+                  validator: (val) {
+                    if (val == null || val.trim().isEmpty) {
+                      return 'Username tidak boleh kosong';
+                    }
+                    if (val.trim().length < 3) {
+                      return 'Username minimal 3 karakter';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      if (!formKey.currentState!.validate()) return;
+                      final newUsername = controller.text.trim();
+                      setDialogState(() => isSaving = true);
+                      final success = await ref
+                          .read(authProvider.notifier)
+                          .updateProfile(username: newUsername);
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              success
+                                  ? 'Username berhasil diubah ke "$newUsername"'
+                                  : 'Gagal mengubah username',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor:
+                                success ? AppColors.success : AppColors.error,
+                          ),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+              ),
+              child: isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Simpan'),
+            ),
+          ],
         ),
       ),
     );

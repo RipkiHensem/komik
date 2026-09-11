@@ -94,7 +94,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final comicAsync = ref.watch(comicDetailProvider(widget.comicId));
+    final comicAsync = ref.watch(comicFromDetailProvider(widget.comicId));
     final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
     final readChapters = ref.watch(readChaptersProvider(widget.comicId));
 
@@ -352,7 +352,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                                 if (existing != null) {
                                   ref
                                       .read(bookmarksProvider.notifier)
-                                      .removeBookmark(existing.id);
+                                      .removeBookmarkByComicId(existing.comicId);
                                   ScaffoldMessenger.of(context).hideCurrentSnackBar();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -521,7 +521,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
         ),
         error: (error, _) => ErrorView(
           message: 'Gagal memuat detail komik',
-          onRetry: () => ref.invalidate(comicDetailProvider(widget.comicId)),
+          onRetry: () => ref.invalidate(comicFromDetailProvider(widget.comicId)),
         ),
       ),
     );

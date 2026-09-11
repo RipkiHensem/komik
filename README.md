@@ -1,108 +1,113 @@
 # ComicStream 📚
 
-**Aplikasi Baca Komik/Manhwa Mobile** — Flutter + Node.js + PostgreSQL
+**Aplikasi Baca Komik / Manhwa Mobile Modern** — Flutter + Supabase
 
-> Mata Kuliah: Pemrograman Mobile Era AI Agent  
-> Skema: Project-Based Learning — 12 Pertemuan
+> **Mata Kuliah:** Pemrograman Mobile  
+> **Skema:** Project-Based Learning — 12 Pertemuan  
+> **Tahap Saat Ini:** Tahap 1 • Define the mobile product (Minggu 01 - 03)  
+> **Dokumentasi Lengkap:** Lihat [LAPORAN_TAHAP_1.md](LAPORAN_TAHAP_1.md)
 
-## 📱 Preview
+---
 
-Aplikasi membaca komik mobile dengan dark theme terinspirasi shinigami.to, mendukung mode baca halaman (manga) dan scroll vertikal (manhwa/webtoon).
+## 🎯 Progress Capaian Proyek (Tahap 1)
+
+| Minggu | Fokus | Output Wajib | Status |
+|---|---|---|---|
+| **01** | **Kickoff & ide** | Problem statement, target user, nilai aplikasi, batas fitur. | ✅ Selesai |
+| **02** | **User flow** | Daftar screen, alur utama, navigasi, dan skenario penggunaan. | ✅ Selesai |
+| **03** | **UI & foundation** | **Prototype, struktur proyek, routing, reusable component/widget, Git.** | ✅ Selesai (Siap Review) |
+
+*Detail pembahasan setiap minggu dapat dilihat di dokumen [LAPORAN_TAHAP_1.md](LAPORAN_TAHAP_1.md).*
+
+---
+
+## 📱 Ringkasan Fitur Prototype (Minggu 03)
+
+- 🎨 **Dark OLED Luxury Theme**: UI estetik bernuansa gelap dengan aksen ungu neon (`#8B5CF6`).
+- 🧭 **Routing Deklaratif (GoRouter)**: Navigasi terstruktur menggunakan `ShellRoute` (persistent bottom navigation).
+- 📖 **Dual Reading Engine**: Mode baca vertikal (Webtoon) dan mode halaman (Manga).
+- 🔐 **Autentikasi Fleksibel**: Registrasi otomatis login, serta mendukung login via **Username** maupun **Email**.
+- 👤 **Profil & Kustomisasi**: Penggantian avatar dan fitur ubah username secara instan.
+- 🧩 **Modular & Reusable Widgets**: Komponen modular seperti `ComicCard`, `ProxiedImage`, `HoverWidget`, `GenreChip`, dll.
+
+---
 
 ## 🏗 Tech Stack
 
-| Layer | Teknologi |
-|-------|-----------|
-| Mobile App | Flutter (Dart) |
-| State Management | Riverpod |
-| Navigation | go_router |
-| Network | Dio |
-| Local Storage | Hive + Flutter Secure Storage |
-| Backend API | Node.js + Express |
-| Database | PostgreSQL |
-| Auth | JWT (JSON Web Token) |
+| Komponen | Teknologi |
+|---|---|
+| **Frontend Mobile** | Flutter (Dart 3.x) |
+| **State Management** | Flutter Riverpod |
+| **Navigation & Routing** | GoRouter |
+| **Backend as a Service** | Supabase (PostgreSQL, Auth, Edge Functions) |
+| **Local / Cache Storage**| Hive & Shared Preferences |
+| **Version Control** | Git & GitHub |
 
-## 📂 Struktur Project
+---
+
+## 📂 Struktur Proyek (Clean Architecture)
 
 ```
-├── comicstream_app/           # Flutter Mobile App
-│   ├── lib/
-│   │   ├── core/              # Theme, constants
-│   │   ├── data/              # Models, services, providers
-│   │   ├── presentation/      # Screens & widgets
-│   │   └── router/            # Go Router config
-│   └── pubspec.yaml
+comicstream_app/lib/
+├── core/                         # Konfigurasi Tema, Warna, dan Konstanta
+│   ├── constants/                # AppConstants, Keys
+│   ├── theme/                    # AppColors, AppTheme
+│   └── utils/                    # Helper & Image Picker
 │
-├── comicstream_backend/       # Node.js REST API
-│   ├── src/
-│   │   ├── config/            # Database connection
-│   │   ├── middleware/        # JWT auth
-│   │   ├── routes/            # API endpoints
-│   │   └── seeds/             # Dummy data
-│   └── package.json
+├── data/                         # Data, Model, dan State Management
+│   ├── models/                   # Comic, Chapter, Bookmark, User
+│   ├── providers/                # Riverpod Providers
+│   └── services/                 # SupabaseComicService & SupabaseAuthService
+│
+├── presentation/                 # Tampilan Antarmuka (UI)
+│   ├── screens/                  # 8 Screen Aplikasi
+│   │   ├── auth/                 # Login & Register Screen
+│   │   ├── bookmark/             # Bookmark & History Screen
+│   │   ├── detail/               # Comic Detail Screen
+│   │   ├── home/                 # Home Screen (Hero carousel, grid)
+│   │   ├── main/                 # MainShell (Bottom Navigation Bar)
+│   │   ├── profile/              # Profile Screen & Avatar Dialog
+│   │   ├── reader/               # Reader Screen (Dual Mode Engine)
+│   │   ├── search/               # Search & Filter Screen
+│   │   └── splash/               # Splash Screen
+│   └── widgets/                  # Reusable Components (ComicCard, HoverWidget, dll)
+│
+└── router/                       # Navigasi Aplikasi
+    └── router.dart               # GoRouter Configuration
 ```
 
-## 🚀 Cara Menjalankan
+---
 
-### Prerequisites
-- Flutter SDK 3.x+
-- Node.js 18+
-- PostgreSQL 14+
+## 🚀 Cara Menjalankan Prototype (Offline Review UI)
 
-### 1. Setup Database
-```bash
-# Buat database PostgreSQL
-createdb comicstream
-```
+Pastikan Flutter SDK sudah terpasang di komputer Anda.
 
-### 2. Setup Backend
-```bash
-cd comicstream_backend
-npm install
-
-# Edit .env sesuai konfigurasi PostgreSQL lokal
-# Jalankan seed data
-npm run seed
-
-# Jalankan server
-npm run dev
-```
-
-### 3. Setup Flutter App
+### 1. Masuk ke direktori aplikasi
 ```bash
 cd comicstream_app
-flutter pub get
-flutter run
 ```
 
-## 📡 API Endpoints
+### 2. Pasang Dependencies
+```bash
+flutter pub get
+```
 
-| Method | Endpoint | Fungsi |
-|--------|----------|--------|
-| POST | `/api/auth/register` | Registrasi |
-| POST | `/api/auth/login` | Login → JWT |
-| GET | `/api/auth/me` | Profil user |
-| GET | `/api/comics` | Daftar komik (search, filter, sort) |
-| GET | `/api/comics/:id` | Detail komik |
-| GET | `/api/comics/:id/chapters` | Daftar chapter |
-| GET | `/api/chapters/:id/pages` | Halaman reader |
-| POST | `/api/bookmarks` | Simpan/update bookmark |
-| GET | `/api/bookmarks/me` | Bookmark user |
-| DELETE | `/api/bookmarks/:id` | Hapus bookmark |
+### 3. Jalankan Aplikasi
+- **Di Google Chrome (Web - Cepat):**
+  ```bash
+  flutter run -d chrome --web-port=8080
+  ```
+- **Di Windows Desktop:**
+  ```bash
+  flutter run -d windows
+  ```
+- **Di Android (Emulator / Device):**
+  ```bash
+  flutter run -d android
+  ```
 
-## 🎨 Fitur
+---
 
-- ✅ Autentikasi JWT (register, login, logout)
-- ✅ Home dengan hero carousel & grid komik
-- ✅ Pencarian & filter (genre, format, status, sort)
-- ✅ Detail komik dengan metadata & daftar chapter
-- ✅ Reader dual mode (page-view & scroll vertikal)
-- ✅ Bookmark & histori baca otomatis
-- ✅ Dark theme premium
-- ✅ Loading skeleton (shimmer)
-- ✅ Error & empty state handling
-- ✅ Pull-to-refresh
-
-## 📝 License
-
-Educational project — for academic purposes only.
+## 📝 Lisensi & Catatan Akademik
+Proyek ini dibuat untuk keperluan akademik mata kuliah **Pemrograman Mobile**.  
+Repositori: [https://github.com/RipkiHensem/komik](https://github.com/RipkiHensem/komik)

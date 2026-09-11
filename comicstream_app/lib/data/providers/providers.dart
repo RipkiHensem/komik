@@ -1,18 +1,21 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user.dart';
 import '../models/comic.dart';
 import '../models/chapter.dart';
 import '../models/comic_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import '../models/bookmark.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 
 // ── Service Providers ───────────────────────────────────────
 
-final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
-final authServiceProvider = Provider<AuthService>((ref) => AuthService());
+final mangaApiServiceProvider = Provider<MangaApiService>((ref) => MangaApiService());
+final supabaseComicServiceProvider = Provider<SupabaseComicService>((ref) => SupabaseComicService(Supabase.instance.client));
+final supabaseAuthServiceProvider = Provider<SupabaseAuthService>((ref) => SupabaseAuthService());
 
 // ── Auth State ──────────────────────────────────────────────
 
@@ -21,71 +24,53 @@ enum AuthStatus { initial, authenticated, unauthenticated, loading }
 class AuthState {
   final AuthStatus status;
   final User? user;
-  final String? token;
   final String? errorMessage;
 
   const AuthState({
     this.status = AuthStatus.initial,
     this.user,
-    this.token,
     this.errorMessage,
   });
 
   AuthState copyWith({
     AuthStatus? status,
     User? user,
-    String? token,
     String? errorMessage,
   }) {
     return AuthState(
       status: status ?? this.status,
       user: user ?? this.user,
-      token: token ?? this.token,
       errorMessage: errorMessage,
     );
   }
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
-  final ApiService _apiService;
-  final AuthService _authService;
+  final SupabaseAuthService _authService;
 
-  AuthNotifier(this._apiService, this._authService) : super(const AuthState()) {
+  AuthNotifier(this._authService) : super(const AuthState()) {
     _checkAuth();
   }
 
   Future<void> _checkAuth() async {
-    final token = await _authService.getToken();
-    final user = await _authService.getUser();
-    if (token != null && user != null) {
-      _apiService.setAuthToken(token);
+    final user = _authService.getCurrentUser();
+    if (user != null) {
+      // Ambil profil lengkap (termasuk avatar & username dari profiles table)
+      final fullUser = await _authService.fetchFullProfile();
       state = AuthState(
         status: AuthStatus.authenticated,
-        user: user,
-        token: token,
+        user: fullUser ?? user,
       );
     } else {
       state = const AuthState(status: AuthStatus.unauthenticated);
     }
   }
 
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(String username, String password) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null);
     try {
-      final response = await _apiService.login(email: email, password: password);
-      final token = response['token'] as String;
-      final userData = response['user'] as Map<String, dynamic>;
-      final user = User.fromJson(userData);
-
-      await _authService.saveToken(token);
-      await _authService.saveUser(user);
-      _apiService.setAuthToken(token);
-
-      state = AuthState(
-        status: AuthStatus.authenticated,
-        user: user,
-        token: token,
-      );
+      final user = await _authService.login(username: username, password: password);
+      state = AuthState(status: AuthStatus.authenticated, user: user);
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -99,24 +84,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> register(String username, String email, String password) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null);
     try {
-      final response = await _apiService.register(
+      final user = await _authService.register(
         username: username,
         email: email,
         password: password,
       );
-      final token = response['token'] as String;
-      final userData = response['user'] as Map<String, dynamic>;
-      final user = User.fromJson(userData);
-
-      await _authService.saveToken(token);
-      await _authService.saveUser(user);
-      _apiService.setAuthToken(token);
-
-      state = AuthState(
-        status: AuthStatus.authenticated,
-        user: user,
-        token: token,
-      );
+      state = AuthState(status: AuthStatus.authenticated, user: user);
       return true;
     } catch (e) {
       state = state.copyWith(
@@ -128,15 +101,30 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
-    await _authService.clearAll();
-    _apiService.setAuthToken(null);
+    await _authService.logout();
     state = const AuthState(status: AuthStatus.unauthenticated);
+  }
+
+  Future<bool> updateProfile({String? username, String? avatarUrl}) async {
+    try {
+      final updatedUser = await _authService.updateProfile(
+        username: username,
+        avatarUrl: avatarUrl,
+      );
+      if (updatedUser != null) {
+        state = state.copyWith(user: updatedUser);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      state = state.copyWith(errorMessage: _parseError(e));
+      return false;
+    }
   }
 
   Future<bool> updateAvatar(String? avatarUrl) async {
     try {
-      final updatedUser = await _apiService.updateAvatar(avatarUrl);
-      await _authService.saveUser(updatedUser);
+      final updatedUser = await _authService.updateAvatar(avatarUrl);
       state = state.copyWith(user: updatedUser);
       return true;
     } catch (e) {
@@ -145,104 +133,183 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<bool> uploadAvatarBase64(String imageBase64) async {
-    try {
-      final updatedUser = await _apiService.uploadAvatarBase64(imageBase64);
-      await _authService.saveUser(updatedUser);
-      state = state.copyWith(user: updatedUser);
-      return true;
-    } catch (e) {
-      state = state.copyWith(errorMessage: _parseError(e));
-      return false;
-    }
-  }
+  // uploadAvatarBase64 dihapus karena Supabase Storage lebih cocok
+  // untuk tahap ini cukup simpan URL avatar saja
 
   String _parseError(dynamic e) {
-    if (e is Exception) {
-      final msg = e.toString();
-      if (msg.contains('DioException')) {
-        if (msg.contains('401')) return 'Email atau password salah';
-        if (msg.contains('409')) return 'Email sudah terdaftar';
-        if (msg.contains('connection')) return 'Tidak dapat terhubung ke server';
-      }
-      return msg.replaceAll('Exception: ', '');
+    final msg = e.toString();
+    if (msg.contains('Username') || msg.contains('tidak ditemukan')) {
+      return 'Username atau email tidak ditemukan. Pastikan akun sudah terdaftar atau cek kembali ejaan username.';
     }
-    return 'Terjadi kesalahan. Silakan coba lagi.';
+    if (msg.contains('Password salah') ||
+        msg.contains('Invalid login credentials') ||
+        msg.contains('invalid_credentials') ||
+        msg.contains('invalid_grant')) {
+      return 'Password salah. Silakan periksa kembali password kamu.';
+    }
+    if (msg.contains('Email not confirmed')) {
+      return 'Email belum diverifikasi. Silakan cek kotak masuk email atau matikan "Confirm email" di Supabase Dashboard.';
+    }
+    if (msg.contains('User already registered') ||
+        msg.contains('already been registered') ||
+        msg.contains('user_already_exists')) {
+      return 'Email atau username ini sudah terdaftar. Silakan langsung masuk.';
+    }
+    if (msg.contains('over_email_send_rate_limit') || msg.contains('rate limit exceeded')) {
+      return 'Batas pengiriman email tercapai. Silakan coba beberapa menit lagi.';
+    }
+    if (msg.contains('Password should be at least')) {
+      return 'Password minimal 6 karakter.';
+    }
+    if (msg.contains('connection') || msg.contains('SocketException') || msg.contains('Failed host lookup')) {
+      return 'Tidak dapat terhubung ke server. Periksa koneksi internet.';
+    }
+    return msg
+        .replaceAll('Exception: ', '')
+        .replaceAll('AuthApiException: ', '')
+        .replaceAll('AuthException: ', '');
   }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  return AuthNotifier(
-    ref.watch(apiServiceProvider),
-    ref.watch(authServiceProvider),
-  );
+  return AuthNotifier(ref.watch(supabaseAuthServiceProvider));
 });
 
-// ── Comics Providers ────────────────────────────────────────
+// ── Comics Providers (Supabase) ─────────────────────────────
 
-final comicsProvider = FutureProvider.family<List<Comic>, Map<String, String?>>((ref, params) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(
-    search: params['search'],
-    genre: params['genre'],
-    format: params['format'],
-    status: params['status'],
-    sortBy: params['sortBy'],
-  );
+final latestComicsProvider = FutureProvider<List<Comic>>((ref) async {
+  return ref.read(supabaseComicServiceProvider).getLatestManga(page: 1);
 });
 
 final popularComicsProvider = FutureProvider<List<Comic>>((ref) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(sortBy: 'popular', limit: 7);
+  return ref.read(supabaseComicServiceProvider).getPopularManga(page: 1);
 });
 
-final latestComicsProvider = FutureProvider<List<Comic>>((ref) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(sortBy: 'latest', limit: 20);
+final recommendedComicsProvider = FutureProvider<List<Comic>>((ref) async {
+  return ref.read(supabaseComicServiceProvider).getRecommended();
 });
 
-final popularComicsByFormatProvider = FutureProvider.family<List<Comic>, String?>((ref, format) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(
-    sortBy: 'popular',
-    format: format,
-    limit: 7,
-  );
+final manhwaProvider = FutureProvider<List<Comic>>((ref) async {
+  return ref.read(supabaseComicServiceProvider).getManhwa(page: 1);
 });
 
-final latestComicsByFormatProvider = FutureProvider.family<List<Comic>, String?>((ref, format) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(
-    sortBy: 'latest',
-    format: format,
-    limit: 20,
-  );
+final manhuaProvider = FutureProvider<List<Comic>>((ref) async {
+  return ref.read(supabaseComicServiceProvider).getManhua(page: 1);
 });
 
-final comicDetailProvider = FutureProvider.family<Comic, String>((ref, comicId) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComicDetail(comicId);
+final popularComicsByFormatProvider =
+    FutureProvider.family<List<Comic>, String?>((ref, format) async {
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
+
+  try {
+    List<Comic> list;
+    if (format == 'Manhwa') {
+      list = await liveApi.getManhwa(page: 1);
+    } else if (format == 'Manhua') {
+      list = await liveApi.getManhua(page: 1);
+    } else {
+      list = await liveApi.getPopularManga(page: 1);
+    }
+    if (list.isNotEmpty) return list;
+  } catch (e) {
+    debugPrint('[Live API Fallback] popularComics: $e');
+  }
+
+  // Fallback to Supabase Database
+  if (format == 'Manhwa') {
+    return dbApi.getManhwa(page: 1);
+  } else if (format == 'Manhua') {
+    return dbApi.getManhua(page: 1);
+  } else if (format == 'Manga') {
+    return dbApi.getManga(page: 1);
+  } else {
+    return dbApi.getPopularManga(page: 1);
+  }
 });
 
-final comicChaptersProvider = FutureProvider.family<List<Chapter>, String>((ref, comicId) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComicChapters(comicId);
+final latestComicsByFormatProvider =
+    FutureProvider.family<List<Comic>, String?>((ref, format) async {
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
+
+  try {
+    List<Comic> list;
+    if (format == 'Manhwa') {
+      list = await liveApi.getManhwa(page: 1);
+    } else if (format == 'Manhua') {
+      list = await liveApi.getManhua(page: 1);
+    } else {
+      list = await liveApi.getLatestManga(page: 1);
+    }
+    if (list.isNotEmpty) return list;
+  } catch (e) {
+    debugPrint('[Live API Fallback] latestComics: $e');
+  }
+
+  // Fallback to Supabase Database
+  if (format == 'Manhwa') {
+    return dbApi.getManhwa(page: 1);
+  } else if (format == 'Manhua') {
+    return dbApi.getManhua(page: 1);
+  } else if (format == 'Manga') {
+    return dbApi.getManga(page: 1);
+  } else {
+    return dbApi.getLatestManga(page: 1);
+  }
 });
 
-// ── Chapter Pages Provider ──────────────────────────────────
+final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>((ref, endpoint) async {
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
 
-final chapterPagesProvider = FutureProvider.family<List<ComicPage>, String>((ref, chapterId) async {
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getChapterPages(chapterId);
+  try {
+    final detail = await liveApi.getComicDetail(endpoint);
+    if (detail.isNotEmpty && (detail['chapters'] as List?)?.isNotEmpty == true) {
+      return detail;
+    }
+  } catch (e) {
+    debugPrint('[Live API Fallback] comicDetail: $e');
+  }
+
+  return dbApi.getComicDetail(endpoint);
 });
 
-// ── Bookmarks Provider ──────────────────────────────────────
+/// Provider khusus untuk data Comic dari detail
+final comicFromDetailProvider = FutureProvider.family<Comic, String>((ref, endpoint) async {
+  final detail = await ref.watch(comicDetailProvider(endpoint).future);
+  return detail['comic'] as Comic;
+});
+
+/// Provider khusus untuk chapters dari detail
+final comicChaptersProvider = FutureProvider.family<List<Chapter>, String>((ref, endpoint) async {
+  final detail = await ref.watch(comicDetailProvider(endpoint).future);
+  return detail['chapters'] as List<Chapter>;
+});
+
+// ── Chapter Pages ─────────────────────────────────────────
+
+final chapterPagesProvider = FutureProvider.family<List<ComicPage>, String>((ref, chapterEndpoint) async {
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
+
+  try {
+    final pages = await liveApi.getChapterPages(chapterEndpoint);
+    if (pages.isNotEmpty) return pages;
+  } catch (e) {
+    debugPrint('[Live API Fallback] chapterPages: $e');
+  }
+
+  return dbApi.getChapterPages(chapterEndpoint);
+});
+
+// ── Bookmarks Provider (Supabase) ────────────────────────────
 
 class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
-  final ApiService _apiService;
+  final SupabaseAuthService _authService;
   final bool _isAuthenticated;
 
-  BookmarksNotifier(this._apiService, this._isAuthenticated)
+  BookmarksNotifier(this._authService, this._isAuthenticated)
       : super(const AsyncValue.loading()) {
     if (_isAuthenticated) {
       loadBookmarks();
@@ -258,45 +325,47 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     }
     state = const AsyncValue.loading();
     try {
-      final bookmarks = await _apiService.getMyBookmarks();
+      final bookmarks = await _authService.getMyBookmarks();
       state = AsyncValue.data(bookmarks);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
   }
 
-  Future<void> addBookmark(String comicId) async {
+  Future<void> addBookmark(String comicId, {String? title, String? coverUrl}) async {
     if (!_isAuthenticated) return;
     try {
-      await _apiService.saveBookmark(comicId: comicId);
+      await _authService.saveBookmark(
+        comicId: comicId,
+        comicTitle: title,
+        comicCoverUrl: coverUrl,
+      );
       await loadBookmarks();
-    } catch (_) {
-      // Optionally handle error
-    }
+    } catch (_) {}
   }
 
-  Future<void> updateProgress(String comicId, String chapterId, int page) async {
+  Future<void> updateProgress(String comicId, String chapterId, int page, {
+    String? comicTitle,
+    String? comicCoverUrl,
+  }) async {
     if (!_isAuthenticated) return;
     try {
-      // Progress is saved to HISTORY (not bookmarks — user must explicitly bookmark)
-      await _apiService.saveHistory(
+      await _authService.saveHistory(
         comicId: comicId,
         lastChapterId: chapterId,
         lastPage: page,
+        comicTitle: comicTitle,
+        comicCoverUrl: comicCoverUrl,
       );
-    } catch (_) {
-      // Silently fail for progress updates
-    }
+    } catch (_) {}
   }
 
-  Future<void> removeBookmark(String bookmarkId) async {
+  Future<void> removeBookmarkByComicId(String comicId) async {
     if (!_isAuthenticated) return;
     try {
-      await _apiService.deleteBookmark(bookmarkId);
+      await _authService.deleteBookmarkByComicId(comicId);
       await loadBookmarks();
-    } catch (_) {
-      // Optionally handle error
-    }
+    } catch (_) {}
   }
 
   bool isBookmarked(String comicId) {
@@ -310,16 +379,16 @@ final bookmarksProvider =
     StateNotifierProvider<BookmarksNotifier, AsyncValue<List<Bookmark>>>((ref) {
   final authState = ref.watch(authProvider);
   final isAuth = authState.status == AuthStatus.authenticated;
-  return BookmarksNotifier(ref.watch(apiServiceProvider), isAuth);
+  return BookmarksNotifier(ref.watch(supabaseAuthServiceProvider), isAuth);
 });
 
-// ── History Provider ─────────────────────────────────────────
+// ── History Provider (Supabase) ───────────────────────────────
 
 class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
-  final ApiService _apiService;
+  final SupabaseAuthService _authService;
   final bool _isAuthenticated;
 
-  HistoryNotifier(this._apiService, this._isAuthenticated)
+  HistoryNotifier(this._authService, this._isAuthenticated)
       : super(const AsyncValue.loading()) {
     if (_isAuthenticated) {
       loadHistory();
@@ -335,7 +404,7 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     }
     state = const AsyncValue.loading();
     try {
-      final history = await _apiService.getMyHistory();
+      final history = await _authService.getMyHistory();
       state = AsyncValue.data(history);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -345,7 +414,7 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
   Future<void> deleteEntry(String historyId) async {
     if (!_isAuthenticated) return;
     try {
-      await _apiService.deleteHistory(historyId);
+      await _authService.deleteHistory(historyId);
       await loadHistory();
     } catch (_) {}
   }
@@ -356,25 +425,28 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
       return;
     }
     try {
-      await _apiService.clearHistory();
+      await _authService.clearHistory();
       state = const AsyncValue.data([]);
     } catch (_) {}
   }
 
-  /// Immediately records reading progress and refreshes history state
   Future<void> recordProgress({
     required String comicId,
     String? chapterId,
     int page = 1,
+    String? comicTitle,
+    String? comicCoverUrl,
   }) async {
     if (!_isAuthenticated) return;
     try {
-      await _apiService.saveHistory(
+      await _authService.saveHistory(
         comicId: comicId,
         lastChapterId: chapterId,
         lastPage: page,
+        comicTitle: comicTitle,
+        comicCoverUrl: comicCoverUrl,
       );
-      final history = await _apiService.getMyHistory();
+      final history = await _authService.getMyHistory();
       state = AsyncValue.data(history);
     } catch (_) {}
   }
@@ -384,17 +456,17 @@ final historyProvider =
     StateNotifierProvider<HistoryNotifier, AsyncValue<List<Bookmark>>>((ref) {
   final authState = ref.watch(authProvider);
   final isAuth = authState.status == AuthStatus.authenticated;
-  return HistoryNotifier(ref.watch(apiServiceProvider), isAuth);
+  return HistoryNotifier(ref.watch(supabaseAuthServiceProvider), isAuth);
 });
 
-// ── Read Chapters Provider (per comic) ───────────────────────
+// ── Read Chapters Provider ────────────────────────────────────
 
 class ReadChaptersNotifier extends StateNotifier<Set<String>> {
-  final ApiService _apiService;
+  final SupabaseAuthService _authService;
   final String _comicId;
   static const _storage = FlutterSecureStorage();
 
-  ReadChaptersNotifier(this._apiService, this._comicId) : super({}) {
+  ReadChaptersNotifier(this._authService, this._comicId) : super({}) {
     _load();
   }
 
@@ -414,9 +486,9 @@ class ReadChaptersNotifier extends StateNotifier<Set<String>> {
       state = Set.from(localSet);
     }
 
-    // Sync with backend
+    // Sync dengan Supabase
     try {
-      final remoteList = await _apiService.getReadChapters(_comicId);
+      final remoteList = await _authService.getReadChapters(_comicId);
       if (remoteList.isNotEmpty) {
         localSet.addAll(remoteList);
         state = Set.from(localSet);
@@ -440,7 +512,7 @@ class ReadChaptersNotifier extends StateNotifier<Set<String>> {
     state = updated;
     await _saveLocal(updated);
     try {
-      await _apiService.markChapterRead(_comicId, chapterId);
+      await _authService.markChapterRead(_comicId, chapterId);
     } catch (_) {}
   }
 
@@ -450,10 +522,10 @@ class ReadChaptersNotifier extends StateNotifier<Set<String>> {
 final readChaptersProvider =
     StateNotifierProvider.family<ReadChaptersNotifier, Set<String>, String>(
         (ref, comicId) {
-  return ReadChaptersNotifier(ref.watch(apiServiceProvider), comicId);
+  return ReadChaptersNotifier(ref.watch(supabaseAuthServiceProvider), comicId);
 });
 
-// ── Search State ────────────────────────────────────────────
+// ── Search State ─────────────────────────────────────────────
 
 class SearchState {
   final String query;
@@ -461,6 +533,7 @@ class SearchState {
   final String? selectedFormat;
   final String? selectedStatus;
   final String sortBy;
+  final int page;
 
   const SearchState({
     this.query = '',
@@ -468,6 +541,7 @@ class SearchState {
     this.selectedFormat,
     this.selectedStatus,
     this.sortBy = 'latest',
+    this.page = 1,
   });
 
   SearchState copyWith({
@@ -476,6 +550,7 @@ class SearchState {
     String? selectedFormat,
     String? selectedStatus,
     String? sortBy,
+    int? page,
   }) {
     return SearchState(
       query: query ?? this.query,
@@ -483,6 +558,7 @@ class SearchState {
       selectedFormat: selectedFormat ?? this.selectedFormat,
       selectedStatus: selectedStatus ?? this.selectedStatus,
       sortBy: sortBy ?? this.sortBy,
+      page: page ?? this.page,
     );
   }
 
@@ -492,34 +568,53 @@ class SearchState {
       selectedFormat != null ||
       selectedStatus != null ||
       sortBy != 'latest';
-
-  Map<String, String?> toParams() {
-    return {
-      'search': query.isEmpty ? null : query,
-      'genre': selectedGenres.isEmpty ? null : selectedGenres.join(','),
-      'format': selectedFormat,
-      'status': selectedStatus,
-      'sortBy': sortBy,
-    };
-  }
 }
 
 final searchStateProvider = StateProvider<SearchState>((ref) => const SearchState());
 
 final searchComicsProvider = FutureProvider<List<Comic>>((ref) async {
   final searchState = ref.watch(searchStateProvider);
-  final apiService = ref.read(apiServiceProvider);
-  return apiService.getComics(
-    search: searchState.query.isEmpty ? null : searchState.query,
-    genre: searchState.selectedGenres.isEmpty ? null : searchState.selectedGenres.join(','),
-    format: searchState.selectedFormat,
-    status: searchState.selectedStatus,
-    sortBy: searchState.sortBy,
-  );
+  final api = ref.read(supabaseComicServiceProvider);
+  List<Comic> list;
+
+  if (searchState.query.trim().isNotEmpty) {
+    list = await api.search(searchState.query.trim());
+  } else if (searchState.selectedGenres.isNotEmpty) {
+    final genre = searchState.selectedGenres.first;
+    list = await api.getByGenre(genre, page: searchState.page);
+  } else if (searchState.selectedFormat == 'Manhwa') {
+    list = await api.getManhwa(page: searchState.page);
+  } else if (searchState.selectedFormat == 'Manhua') {
+    list = await api.getManhua(page: searchState.page);
+  } else if (searchState.selectedFormat == 'Manga') {
+    list = await api.getManga(page: searchState.page);
+  } else if (searchState.sortBy == 'popular') {
+    list = await api.getPopularManga(page: searchState.page);
+  } else {
+    list = await api.getLatestManga(page: searchState.page);
+  }
+
+  // Filter format secara lokal jika query aktif
+  if (searchState.selectedFormat != null && searchState.query.trim().isNotEmpty) {
+    list = list.where((c) => c.format.toLowerCase() == searchState.selectedFormat!.toLowerCase()).toList();
+  }
+
+  // Filter status jika ada
+  if (searchState.selectedStatus != null) {
+    list = list.where((c) => c.status.toLowerCase().contains(searchState.selectedStatus!.toLowerCase())).toList();
+  }
+
+  // Sort
+  if (searchState.sortBy == 'title') {
+    list.sort((a, b) => a.title.compareTo(b.title));
+  } else if (searchState.sortBy == 'rating') {
+    list.sort((a, b) => b.rating.compareTo(a.rating));
+  }
+
+  return list;
 });
 
-// ── UI States: Bookmark Tab & Theme Mode ────────────────────
+// ── UI States ────────────────────────────────────────────────
 
 final bookmarkTabProvider = StateProvider<int>((ref) => 0);
-
 final isDarkModeProvider = StateProvider<bool>((ref) => true);

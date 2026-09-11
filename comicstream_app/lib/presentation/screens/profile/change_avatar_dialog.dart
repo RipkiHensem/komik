@@ -142,16 +142,14 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
     });
 
     bool success = false;
-    if (_pendingBase64Image != null) {
-      success = await ref
-          .read(authProvider.notifier)
-          .uploadAvatarBase64(_pendingBase64Image!);
-    } else {
-      final finalUrl = _selectedAvatarUrl?.trim();
-      success = await ref
-          .read(authProvider.notifier)
-          .updateAvatar(finalUrl?.isNotEmpty == true ? finalUrl : null);
-    }
+    // Base64/local upload tidak tersedia (butuh Supabase Storage).
+    // Gunakan URL avatar dari pilihan yang ada.
+    final finalUrl = _pendingBase64Image != null
+        ? null // base64 tidak bisa disimpan tanpa Storage
+        : _selectedAvatarUrl?.trim();
+    success = await ref
+        .read(authProvider.notifier)
+        .updateAvatar(finalUrl?.isNotEmpty == true ? finalUrl : null);
 
     if (!mounted) return;
 
