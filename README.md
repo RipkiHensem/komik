@@ -1,4 +1,4 @@
-# ComicStream 📚
+# ComicStream 
 
 **Aplikasi Baca Komik / Manhwa Mobile Modern** — Flutter + Supabase
 
@@ -9,7 +9,7 @@
 
 ---
 
-## 🎯 Progress Capaian Proyek (Tahap 1)
+##  Progress Capaian Proyek (Tahap 1)
 
 | Minggu | Fokus | Output Wajib | Status |
 |---|---|---|---|
@@ -21,18 +21,18 @@
 
 ---
 
-## 📱 Ringkasan Fitur Prototype (Minggu 03)
+## Ringkasan Fitur Prototype (Minggu 03)
 
-- 🎨 **Dark OLED Luxury Theme**: UI estetik bernuansa gelap dengan aksen ungu neon (`#8B5CF6`).
-- 🧭 **Routing Deklaratif (GoRouter)**: Navigasi terstruktur menggunakan `ShellRoute` (persistent bottom navigation).
-- 📖 **Dual Reading Engine**: Mode baca vertikal (Webtoon) dan mode halaman (Manga).
-- 🔐 **Autentikasi Fleksibel**: Registrasi otomatis login, serta mendukung login via **Username** maupun **Email**.
-- 👤 **Profil & Kustomisasi**: Penggantian avatar dan fitur ubah username secara instan.
-- 🧩 **Modular & Reusable Widgets**: Komponen modular seperti `ComicCard`, `ProxiedImage`, `HoverWidget`, `GenreChip`, dll.
+-  **Dark OLED Luxury Theme**: UI estetik bernuansa gelap dengan aksen ungu neon (`#8B5CF6`).
+-  **Routing Deklaratif (GoRouter)**: Navigasi terstruktur menggunakan `ShellRoute` (persistent bottom navigation).
+-  **Dual Reading Engine**: Mode baca vertikal (Webtoon) dan mode halaman (Manga).
+-  **Autentikasi Fleksibel**: Registrasi otomatis login, serta mendukung login via **Username** maupun **Email**.
+-  **Profil & Kustomisasi**: Penggantian avatar dan fitur ubah username secara instan.
+-  **Modular & Reusable Widgets**: Komponen modular seperti `ComicCard`, `ProxiedImage`, `HoverWidget`, `GenreChip`, dll.
 
 ---
 
-## 🏗 Tech Stack
+## Tech Stack
 
 | Komponen | Teknologi |
 |---|---|
@@ -45,7 +45,7 @@
 
 ---
 
-## 📂 Struktur Proyek (Clean Architecture)
+##  Struktur Proyek (Clean Architecture)
 
 ```
 comicstream_app/lib/
@@ -78,7 +78,7 @@ comicstream_app/lib/
 
 ---
 
-## 🚀 Cara Menjalankan Prototype (Offline Review UI)
+## Cara Menjalankan Prototype (Offline Review UI)
 
 Pastikan Flutter SDK sudah terpasang di komputer Anda.
 
@@ -105,9 +105,3 @@ flutter pub get
   ```bash
   flutter run -d android
   ```
-
----
-
-## 📝 Lisensi & Catatan Akademik
-Proyek ini dibuat untuk keperluan akademik mata kuliah **Pemrograman Mobile**.  
-Repositori: [https://github.com/RipkiHensem/komik](https://github.com/RipkiHensem/komik)
