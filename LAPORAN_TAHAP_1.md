@@ -1,4 +1,4 @@
-# 📚 LAPORAN TAHAP 1 — DEFINE THE MOBILE PRODUCT
+# LAPORAN TAHAP 1 — DEFINE THE MOBILE PRODUCT
 ## Proyek: ComicStream — Aplikasi Baca Komik Mobile Modern
 **Mata Kuliah:** Pemrograman Mobile  
 **Repositori GitHub:** [https://github.com/RipkiHensem/komik](https://github.com/RipkiHensem/komik)  
@@ -6,7 +6,7 @@
 
 ---
 
-## 📌 DAFTAR ISI
+##  DAFTAR ISI
 1. [Minggu 01: Kickoff & Ide](#-minggu-01-kickoff--ide)
    - 1.1 Problem Statement
    - 1.2 Target User
@@ -25,7 +25,7 @@
 
 ---
 
-## 🎯 MINGGU 01: KICKOFF & IDE
+##  MINGGU 01: KICKOFF & IDE
 
 ### 1.1 Problem Statement
 Banyak pembaca komik digital (manga, manhwa, dan manhua) di Indonesia menghadapi kendala berikut:
@@ -39,10 +39,10 @@ Banyak pembaca komik digital (manga, manhwa, dan manhua) di Indonesia menghadapi
 - **Kebutuhan**: Aplikasi membaca yang cepat, ringan, estetik (Dark Mode premium), mudah mencari komik, dan otomatis mencatat progres membaca.
 
 ### 1.3 Nilai Aplikasi (Value Proposition)
-- 🖤 **Desain Estetik Dark OLED**: Antarmuka modern bernuansa gelap dengan aksen ungu neon, nyaman di mata untuk sesi baca yang lama.
-- 🔄 **Dual Mode Reader**: Mode Scroll Vertikal (khusus Webtoon/Manhwa) dan Mode Halaman Horisontal (khusus Manga) dengan zoom interaktif.
-- ⚡ **Realtime Cloud Sync**: Bookmark dan riwayat baca tersimpan aman di cloud (Supabase) dan dapat diakses dari mana saja.
-- 🔒 **Autentikasi Fleksibel**: Registrasi otomatis masuk (auto-login), serta login fleksibel menggunakan **Username** maupun **Email**.
+-  **Desain Estetik Dark OLED**: Antarmuka modern bernuansa gelap dengan aksen ungu neon, nyaman di mata untuk sesi baca yang lama.
+-  **Dual Mode Reader**: Mode Scroll Vertikal (khusus Webtoon/Manhwa) dan Mode Halaman Horisontal (khusus Manga) dengan zoom interaktif.
+-  **Realtime Cloud Sync**: Bookmark dan riwayat baca tersimpan aman di cloud (Supabase) dan dapat diakses dari mana saja.
+-  **Autentikasi Fleksibel**: Registrasi otomatis masuk (auto-login), serta login fleksibel menggunakan **Username** maupun **Email**.
 
 ### 1.4 Batasan Fitur (Scope 12 Pertemuan)
 | Fase | Pertemuan | Fokus Pengerjaan | Status |
@@ -54,7 +54,7 @@ Banyak pembaca komik digital (manga, manhwa, dan manhua) di Indonesia menghadapi
 
 ---
 
-## 🗺️ MINGGU 02: USER FLOW
+##  MINGGU 02: USER FLOW
 
 ### 2.1 Daftar Screen
 Aplikasi ComicStream memiliki 8 screen utama:
@@ -105,8 +105,7 @@ Aplikasi ComicStream memiliki 8 screen utama:
 
 ---
 
-## 🎨 MINGGU 03: UI & FOUNDATION
-
+##  MINGGU 03: UI & FOUNDATION
 ### 3.1 Prototype & Fitur Siap Review
 Aplikasi ComicStream telah dibangun secara utuh sebagai **Interactive UI Prototype** berbasis Flutter yang siap direview langsung (Web Chrome, Windows, maupun Android):
 - [x] **Dark OLED Luxury Theme**: Warna konsisten menggunakan HSL tailored palette (`#0B0E14` background, `#141923` card, `#8B5CF6` primary violet).
@@ -182,7 +181,7 @@ Untuk memenuhi indikator *Reusable Component*, komponen visual dipisahkan ke dal
 
 ---
 
-## 💻 PANDUAN MENJALANKAN APLIKASI (OFFLINE REVIEW UI)
+## PANDUAN MENJALANKAN APLIKASI (OFFLINE REVIEW UI)
 
 ### Cara 1: Menjalankan di Chrome / Web (Rekomendasi Tercepat)
 ```bash
