@@ -14,6 +14,7 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
+    final isAdmin = ref.watch(isAdminProvider).valueOrNull == true;
     final bookmarksAsync = ref.watch(bookmarksProvider);
     final historyAsync = ref.watch(historyProvider);
     final isDarkMode = ref.watch(isDarkModeProvider);
@@ -40,7 +41,8 @@ class ProfileScreen extends ConsumerWidget {
                               MouseRegion(
                                 cursor: SystemMouseCursors.click,
                                 child: GestureDetector(
-                                  onTap: () => ChangeAvatarDialog.show(context, user),
+                                  onTap: () =>
+                                      ChangeAvatarDialog.show(context, user),
                                   child: Container(
                                     width: 88,
                                     height: 88,
@@ -53,14 +55,18 @@ class ProfileScreen extends ConsumerWidget {
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: AppColors.primary.withValues(alpha: 0.35),
+                                          color: AppColors.primary.withValues(
+                                            alpha: 0.35,
+                                          ),
                                           blurRadius: 18,
                                           offset: const Offset(0, 4),
                                         ),
                                       ],
                                     ),
                                     child: ClipOval(
-                                      child: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+                                      child:
+                                          (user.avatarUrl != null &&
+                                              user.avatarUrl!.isNotEmpty)
                                           ? ProxiedImage(
                                               imageUrl: user.avatarUrl!,
                                               width: 88,
@@ -69,7 +75,8 @@ class ProfileScreen extends ConsumerWidget {
                                               errorWidget: Center(
                                                 child: Text(
                                                   user.username.isNotEmpty
-                                                      ? user.username[0].toUpperCase()
+                                                      ? user.username[0]
+                                                            .toUpperCase()
                                                       : 'U',
                                                   style: const TextStyle(
                                                     fontSize: 34,
@@ -82,7 +89,8 @@ class ProfileScreen extends ConsumerWidget {
                                           : Center(
                                               child: Text(
                                                 user.username.isNotEmpty
-                                                    ? user.username[0].toUpperCase()
+                                                    ? user.username[0]
+                                                          .toUpperCase()
                                                     : 'U',
                                                 style: const TextStyle(
                                                   fontSize: 34,
@@ -101,7 +109,8 @@ class ProfileScreen extends ConsumerWidget {
                                 child: MouseRegion(
                                   cursor: SystemMouseCursors.click,
                                   child: GestureDetector(
-                                    onTap: () => ChangeAvatarDialog.show(context, user),
+                                    onTap: () =>
+                                        ChangeAvatarDialog.show(context, user),
                                     child: Container(
                                       width: 32,
                                       height: 32,
@@ -114,7 +123,9 @@ class ProfileScreen extends ConsumerWidget {
                                         ),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.25),
+                                            color: Colors.black.withValues(
+                                              alpha: 0.25,
+                                            ),
                                             blurRadius: 6,
                                             offset: const Offset(0, 2),
                                           ),
@@ -171,11 +182,18 @@ class ProfileScreen extends ConsumerWidget {
                         onTap: () => ChangeAvatarDialog.show(context, user),
                         borderRadius: BorderRadius.circular(20),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.edit_rounded, size: 14, color: AppColors.primary),
+                              Icon(
+                                Icons.edit_rounded,
+                                size: 14,
+                                color: AppColors.primary,
+                              ),
                               const SizedBox(width: 5),
                               Text(
                                 'Ganti Foto Profil',
@@ -214,7 +232,8 @@ class ProfileScreen extends ConsumerWidget {
                         HoverWidget(
                           scale: 1.15,
                           child: InkWell(
-                            onTap: () => _showEditUsernameDialog(context, ref, user),
+                            onTap: () =>
+                                _showEditUsernameDialog(context, ref, user),
                             borderRadius: BorderRadius.circular(16),
                             child: Padding(
                               padding: const EdgeInsets.all(4),
@@ -231,11 +250,9 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    user?.email ?? 'Masuk untuk sinkronisasi bookmark & riwayat',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textMuted,
-                    ),
+                    user?.email ??
+                        'Masuk untuk sinkronisasi bookmark & riwayat',
+                    style: TextStyle(fontSize: 13, color: AppColors.textMuted),
                   ),
                   const SizedBox(height: 24),
 
@@ -245,7 +262,8 @@ class ProfileScreen extends ConsumerWidget {
                       Expanded(
                         child: _buildStatCard(
                           icon: Icons.bookmark_rounded,
-                          value: bookmarksAsync.whenOrNull(
+                          value:
+                              bookmarksAsync.whenOrNull(
                                 data: (b) => '${b.length}',
                               ) ??
                               '0',
@@ -261,7 +279,8 @@ class ProfileScreen extends ConsumerWidget {
                       Expanded(
                         child: _buildStatCard(
                           icon: Icons.history_rounded,
-                          value: historyAsync.whenOrNull(
+                          value:
+                              historyAsync.whenOrNull(
                                 data: (h) => '${h.length}',
                               ) ??
                               '0',
@@ -296,6 +315,13 @@ class ProfileScreen extends ConsumerWidget {
                       context.go('/bookmarks');
                     },
                   ),
+                  if (isAdmin)
+                    _buildMenuItem(
+                      icon: Icons.admin_panel_settings_outlined,
+                      title: 'Kelola Komik',
+                      subtitle: 'Tambah, edit, dan hapus katalog komik',
+                      onTap: () => context.push('/admin'),
+                    ),
                   if (user != null)
                     _buildMenuItem(
                       icon: Icons.account_circle_rounded,
@@ -304,9 +330,13 @@ class ProfileScreen extends ConsumerWidget {
                       onTap: () => ChangeAvatarDialog.show(context, user),
                     ),
                   _buildMenuItem(
-                    icon: isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                    icon: isDarkMode
+                        ? Icons.dark_mode_rounded
+                        : Icons.light_mode_rounded,
                     title: 'Dark Mode',
-                    subtitle: isDarkMode ? 'Aktif (Mode Gelap)' : 'Nonaktif (Mode Terang)',
+                    subtitle: isDarkMode
+                        ? 'Aktif (Mode Gelap)'
+                        : 'Nonaktif (Mode Terang)',
                     trailing: Switch(
                       value: isDarkMode,
                       onChanged: (val) {
@@ -364,19 +394,23 @@ class ProfileScreen extends ConsumerWidget {
                         height: 50,
                         child: ElevatedButton.icon(
                           onPressed: () => context.push('/login'),
-                          icon: const Icon(Icons.login_rounded, size: 20, color: Colors.white),
-                          label: const Text(
+                          icon: Icon(
+                            Icons.login_rounded,
+                            size: 20,
+                            color: AppColors.background,
+                          ),
+                          label: Text(
                             'Masuk / Daftar Akun',
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              color: AppColors.background,
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
-                            elevation: 4,
-                            shadowColor: AppColors.primary.withValues(alpha: 0.4),
+                            elevation: 0,
+                            shadowColor: Colors.transparent,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
@@ -397,14 +431,18 @@ class ProfileScreen extends ConsumerWidget {
                               builder: (context) => AlertDialog(
                                 backgroundColor: AppColors.card,
                                 title: const Text('Keluar'),
-                                content: const Text('Yakin ingin keluar dari akun?'),
+                                content: const Text(
+                                  'Yakin ingin keluar dari akun?',
+                                ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.pop(context, false),
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
                                     child: const Text('Batal'),
                                   ),
                                   ElevatedButton(
-                                    onPressed: () => Navigator.pop(context, true),
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppColors.error,
                                     ),
@@ -428,17 +466,17 @@ class ProfileScreen extends ConsumerWidget {
                               }
                             }
                           },
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.logout_rounded,
                             color: AppColors.error,
                             size: 20,
                           ),
-                          label: const Text(
+                          label: Text(
                             'Keluar',
                             style: TextStyle(color: AppColors.error),
                           ),
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: AppColors.error),
+                            side: BorderSide(color: AppColors.error),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                         ),
@@ -455,7 +493,11 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditUsernameDialog(BuildContext context, WidgetRef ref, dynamic user) {
+  void _showEditUsernameDialog(
+    BuildContext context,
+    WidgetRef ref,
+    dynamic user,
+  ) {
     final initialUsername = user.username.toString();
     final controller = TextEditingController(text: initialUsername);
     final formKey = GlobalKey<FormState>();
@@ -466,7 +508,9 @@ class ProfileScreen extends ConsumerWidget {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: AppColors.card,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           title: Row(
             children: [
               Icon(Icons.badge_outlined, color: AppColors.primary, size: 22),
@@ -489,7 +533,10 @@ class ProfileScreen extends ConsumerWidget {
               children: [
                 Text(
                   'Username ini digunakan untuk login dan tampil di profil kamu.',
-                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -538,8 +585,9 @@ class ProfileScreen extends ConsumerWidget {
                                   : 'Gagal mengubah username',
                             ),
                             behavior: SnackBarBehavior.floating,
-                            backgroundColor:
-                                success ? AppColors.success : AppColors.error,
+                            backgroundColor: success
+                                ? AppColors.success
+                                : AppColors.error,
                           ),
                         );
                       }
@@ -609,12 +657,15 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Text(
+                  child: Text(
                     'v1.0.0 (Release)',
                     style: TextStyle(
                       fontSize: 12,
@@ -636,11 +687,20 @@ class ProfileScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
                 Divider(color: AppColors.divider),
                 const SizedBox(height: 12),
-                _buildAboutFeatureRow(Icons.bolt_rounded, 'Chapter update berkala & cepat'),
+                _buildAboutFeatureRow(
+                  Icons.bolt_rounded,
+                  'Chapter update berkala & cepat',
+                ),
                 const SizedBox(height: 8),
-                _buildAboutFeatureRow(Icons.bookmark_added_rounded, 'Bookmark & riwayat baca tersimpan rapi'),
+                _buildAboutFeatureRow(
+                  Icons.bookmark_added_rounded,
+                  'Bookmark & riwayat baca tersimpan rapi',
+                ),
                 const SizedBox(height: 8),
-                _buildAboutFeatureRow(Icons.dark_mode_rounded, 'Tema gelap nyaman untuk membaca'),
+                _buildAboutFeatureRow(
+                  Icons.dark_mode_rounded,
+                  'Tema gelap nyaman untuk membaca',
+                ),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
@@ -678,10 +738,7 @@ class ProfileScreen extends ConsumerWidget {
         Expanded(
           child: Text(
             text,
-            style: TextStyle(
-              fontSize: 12,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
         ),
       ],
@@ -762,7 +819,10 @@ class ProfileScreen extends ConsumerWidget {
           boxShadow: AppColors.cardShadow,
         ),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 3,
+          ),
           leading: Container(
             width: 40,
             height: 40,
@@ -783,12 +843,10 @@ class ProfileScreen extends ConsumerWidget {
           ),
           subtitle: Text(
             subtitle,
-            style: TextStyle(
-              fontSize: 12,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
-          trailing: trailing ??
+          trailing:
+              trailing ??
               Icon(
                 Icons.chevron_right_rounded,
                 color: AppColors.textMuted,

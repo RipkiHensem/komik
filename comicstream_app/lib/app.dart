@@ -1,12 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
-import 'data/providers/providers.dart';
+import 'data/providers/providers.dart' hide AuthState;
 import 'router/router.dart';
 
-/// Global scroll behavior enabling mouse/trackpad drag and visible scrollbars
+/// Global scroll behavior enabling mouse/trackpad drag without visual scrollbars
 class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
 
@@ -24,19 +27,43 @@ class AppScrollBehavior extends MaterialScrollBehavior {
     Widget child,
     ScrollableDetails details,
   ) {
-    if (axisDirectionToAxis(details.direction) == Axis.horizontal) {
-      return child;
-    }
-    return super.buildScrollbar(context, child, details);
+    return child;
   }
 }
 
 /// Root widget for ComicStream app
-class ComicStreamApp extends ConsumerWidget {
+class ComicStreamApp extends ConsumerStatefulWidget {
   const ComicStreamApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ComicStreamApp> createState() => _ComicStreamAppState();
+}
+
+class _ComicStreamAppState extends ConsumerState<ComicStreamApp> {
+  late final StreamSubscription<AuthState> _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (state) {
+        if (state.event == AuthChangeEvent.passwordRecovery) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) ref.read(routerProvider).go('/reset-password');
+          });
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final isDark = ref.watch(isDarkModeProvider);
     AppColors.isDark = isDark;

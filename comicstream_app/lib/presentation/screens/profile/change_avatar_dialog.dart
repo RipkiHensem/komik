@@ -236,7 +236,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                       color: AppColors.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.account_circle_rounded,
                       color: AppColors.primary,
                       size: 22,
@@ -361,13 +361,13 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline_rounded,
+                    Icon(Icons.error_outline_rounded,
                         color: AppColors.error, size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           color: AppColors.error,
                           fontWeight: FontWeight.w500,
@@ -459,9 +459,9 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                       scale: 1.05,
                       child: TextButton.icon(
                         onPressed: _isLoading ? null : _removeAvatar,
-                        icon: const Icon(Icons.delete_outline_rounded,
+                        icon: Icon(Icons.delete_outline_rounded,
                             size: 16, color: AppColors.error),
-                        label: const Text(
+                        label: Text(
                           'Hapus',
                           style: TextStyle(color: AppColors.error, fontSize: 12),
                         ),
@@ -670,7 +670,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                               child: Container(
                                 width: 16,
                                 height: 16,
-                                decoration: const BoxDecoration(
+                                decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   shape: BoxShape.circle,
                                 ),
@@ -753,13 +753,13 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
             borderRadius: BorderRadius.circular(10),
             child: OutlinedButton.icon(
               onPressed: _handlePickFile,
-              icon: const Icon(Icons.add_photo_alternate_rounded,
+              icon: Icon(Icons.add_photo_alternate_rounded,
                   color: AppColors.primary, size: 18),
               label: Text(
                 _pendingBase64Image != null
                     ? 'Ganti Foto Terpilih'
                     : 'Pilih File Gambar',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
@@ -767,7 +767,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
               ),
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                side: const BorderSide(color: AppColors.primary),
+                side: BorderSide(color: AppColors.primary),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -826,7 +826,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
               suffixIcon: HoverWidget(
                 scale: 1.15,
                 child: IconButton(
-                  icon: const Icon(Icons.check_circle_rounded,
+                  icon: Icon(Icons.check_circle_rounded,
                       color: AppColors.primary, size: 20),
                   tooltip: 'Terapkan Link',
                   onPressed: () {

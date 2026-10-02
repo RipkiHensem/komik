@@ -27,7 +27,7 @@ class ProxiedImage extends StatelessWidget {
 
   /// Converts a thumbnail URL to go through our Supabase Edge Function proxy
   /// on web to bypass CORS. On mobile/desktop, returns the original URL.
-  String get _resolvedUrl {
+  static String resolveImageUrl(String imageUrl) {
     if (imageUrl.isEmpty) return '';
     // Only proxy on web — mobile & desktop can load directly
     if (!kIsWeb) return imageUrl;
@@ -35,7 +35,8 @@ class ProxiedImage extends StatelessWidget {
     if (imageUrl.contains('/img-proxy')) return imageUrl;
     // On web, external images suffer from CORS restrictions.
     // Proxy any external http/https image that is not from Supabase.
-    final isExternal = imageUrl.contains('thumbnail.komiku.org') ||
+    final isExternal =
+        imageUrl.contains('thumbnail.komiku.org') ||
         imageUrl.contains('komiku.org') ||
         ((imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) &&
             !imageUrl.contains('supabase.co'));
@@ -48,7 +49,7 @@ class ProxiedImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final proxiedUrl = _resolvedUrl;
+    final proxiedUrl = resolveImageUrl(imageUrl);
 
     if (proxiedUrl.isEmpty) {
       return _buildPlaceholder();
@@ -71,7 +72,7 @@ class ProxiedImage extends StatelessWidget {
                   strokeWidth: 2,
                   value: loadingProgress.expectedTotalBytes != null
                       ? loadingProgress.cumulativeBytesLoaded /
-                          loadingProgress.expectedTotalBytes!
+                            loadingProgress.expectedTotalBytes!
                       : null,
                   color: AppColors.primary,
                 ),
@@ -84,10 +85,7 @@ class ProxiedImage extends StatelessWidget {
     );
 
     if (borderRadius != null) {
-      image = ClipRRect(
-        borderRadius: borderRadius!,
-        child: image,
-      );
+      image = ClipRRect(borderRadius: borderRadius!, child: image);
     }
 
     return image;
@@ -102,10 +100,7 @@ class ProxiedImage extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            AppColors.surface,
-            AppColors.card,
-          ],
+          colors: [AppColors.surface, AppColors.card],
         ),
       ),
       child: Center(

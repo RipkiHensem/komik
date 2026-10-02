@@ -49,7 +49,7 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-function parseMangaList($: cheerio.CheerioAPI, type?: string): any[] {
+function parseMangaList($: cheerio.CheerioAPI, fallbackType?: string): any[] {
   const manga_list: any[] = [];
   $(".bge").each((_i, el) => {
     const title = $(el).find(".kan > a > h3").text().trim() ||
@@ -67,10 +67,28 @@ function parseMangaList($: cheerio.CheerioAPI, type?: string): any[] {
       .replace(/^\//, "")
       .replace(/\/$/, "");
 
-    const detectedType = type ||
-      $(el).find(".bgei > a .tpe1_inf > b").text().trim() ||
+    // Extract type from HTML badge (.tpe1_inf b)
+    const scrapedBadge = $(el).find(".bgei > a .tpe1_inf > b").text().trim() ||
       $(el).find(".tpe1_inf b").text().trim() ||
-      "Manga";
+      $(el).find(".tpe1_inf").text().trim();
+
+    let detectedType = scrapedBadge;
+    if (!detectedType && fallbackType) {
+      detectedType = fallbackType;
+    }
+    if (!detectedType) {
+      detectedType = "Manga";
+    }
+
+    // Normalize type string
+    const lower = detectedType.toLowerCase();
+    if (lower.includes("manhwa")) {
+      detectedType = "Manhwa";
+    } else if (lower.includes("manhua")) {
+      detectedType = "Manhua";
+    } else {
+      detectedType = "Manga";
+    }
 
     const updated_on = $(el).find(".kan > .judul2").text().split("|")[0]?.trim() ||
       $(el).find(".kan span.judul2").text().trim();
@@ -139,37 +157,22 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── 1. Latest Manga ──────────────────────────────────────
-    // GET /manga/page/:page  OR  GET /  OR  GET /manga
-    const latestMatch = path.match(/\/manga\/page\/(\d+)/);
-    if (latestMatch || path === "/manga" || path === "/" || path === "") {
-      const page = latestMatch ? latestMatch[1] : "1";
-      const apiPath = page === "1" ? "/manga/" : `/manga/page/${page}/`;
-      const html = await fetchApi(apiPath);
-      const $ = cheerio.load(html);
-      const manga_list = parseMangaList($);
-
-      return jsonResponse({
-        status: true,
-        message: "success",
-        total: manga_list.length,
-        manga_list,
-      });
-    }
-
-    // ── 2. Popular Manga ─────────────────────────────────────
-    // GET /manga/popular/:page
-    const popularMatch = path.match(/\/manga\/popular\/?(\d+)?/);
+    // ── 2. Popular Manga (with optional tipe filter) ──────────
+    // GET /manga/popular/:page?tipe=manhwa|manga|manhua
+    const popularMatch = path.match(/\/manga\/popular(?:\/page)?\/?(\d+)?/);
     if (popularMatch || path === "/manga/popular") {
-      const page = popularMatch?.[1] || "1";
+      const page = popularMatch?.[1] || url.searchParams.get("page") || "1";
+      const rawTipe = url.searchParams.get("tipe") || url.searchParams.get("type") || "";
+      const tipe = rawTipe.toLowerCase();
+      const tipeParam = (tipe === "manhwa" || tipe === "manhua" || tipe === "manga") ? `&tipe=${tipe}` : "";
       const apiPath = page === "1"
-        ? "/manga/?orderby=popular"
-        : `/manga/page/${page}/?orderby=popular`;
+        ? `/manga/?orderby=popular${tipeParam}`
+        : `/manga/page/${page}/?orderby=popular${tipeParam}`;
       const html = await fetchApi(apiPath);
       const $ = cheerio.load(html);
-      const manga_list = parseMangaList($);
+      const manga_list = parseMangaList($, tipe ? (tipe === "manhwa" ? "Manhwa" : tipe === "manhua" ? "Manhua" : "Manga") : undefined);
 
-      return jsonResponse({ status: true, message: "success", manga_list });
+      return jsonResponse({ status: true, message: "success", total: manga_list.length, manga_list });
     }
 
     // ── 3. Recommended / Hot ─────────────────────────────────
@@ -185,41 +188,84 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ status: true, message: "success", manga_list });
     }
 
-    // ── 4. Manhwa ────────────────────────────────────────────
+    // ── 4. Manhwa (Korea Only) ───────────────────────────────
     // GET /manhwa/page/:page  OR  GET /manhwa
-    const manhwaMatch = path.match(/\/manhwa\/page\/(\d+)/) || (path.includes("/manhwa") ? ["", "1"] : null);
+    const manhwaMatch = path.match(/\/manhwa(?:\/page)?\/(\d+)/) || (path === "/manhwa" ? ["", "1"] : null);
     if (manhwaMatch) {
-      const page = manhwaMatch[1] || "1";
+      const page = manhwaMatch[1] || url.searchParams.get("page") || "1";
       const apiPath = page === "1"
-        ? "/manga/?type=manhwa"
-        : `/manga/page/${page}/?type=manhwa`;
+        ? "/manga/?tipe=manhwa"
+        : `/manga/page/${page}/?tipe=manhwa`;
       const html = await fetchApi(apiPath);
       const $ = cheerio.load(html);
       const manga_list = parseMangaList($, "Manhwa");
 
-      return jsonResponse({ status: true, message: "success", manga_list });
+      return jsonResponse({ status: true, message: "success", total: manga_list.length, manga_list });
     }
 
-    // ── 5. Manhua ────────────────────────────────────────────
+    // ── 5. Manhua (China Only) ───────────────────────────────
     // GET /manhua/page/:page  OR  GET /manhua
-    const manhuaMatch = path.match(/\/manhua\/page\/(\d+)/) || (path.includes("/manhua") ? ["", "1"] : null);
+    const manhuaMatch = path.match(/\/manhua(?:\/page)?\/(\d+)/) || (path === "/manhua" ? ["", "1"] : null);
     if (manhuaMatch) {
-      const page = manhuaMatch[1] || "1";
+      const page = manhuaMatch[1] || url.searchParams.get("page") || "1";
       const apiPath = page === "1"
-        ? "/manga/?type=manhua"
-        : `/manga/page/${page}/?type=manhua`;
+        ? "/manga/?tipe=manhua"
+        : `/manga/page/${page}/?tipe=manhua`;
       const html = await fetchApi(apiPath);
       const $ = cheerio.load(html);
       const manga_list = parseMangaList($, "Manhua");
 
-      return jsonResponse({ status: true, message: "success", manga_list });
+      return jsonResponse({ status: true, message: "success", total: manga_list.length, manga_list });
     }
 
-    // ── 6. Search ────────────────────────────────────────────
+    // ── 6. Manga (Jepang Only) ───────────────────────────────
+    // GET /manga/japan/page/:page  OR  GET /manga/japan
+    const japanMatch = path.match(/\/manga\/japan(?:\/page)?\/(\d+)/) || (path === "/manga/japan" ? ["", "1"] : null);
+    if (japanMatch) {
+      const page = japanMatch[1] || url.searchParams.get("page") || "1";
+      const apiPath = page === "1"
+        ? "/manga/?tipe=manga"
+        : `/manga/page/${page}/?tipe=manga`;
+      const html = await fetchApi(apiPath);
+      const $ = cheerio.load(html);
+      const manga_list = parseMangaList($, "Manga");
+
+      return jsonResponse({ status: true, message: "success", total: manga_list.length, manga_list });
+    }
+
+    // ── 1. Latest Manga (All / filtered by ?tipe=) ────────────
+    // GET /manga/page/:page  OR  GET /  OR  GET /manga
+    const latestMatch = path.match(/\/manga(?:\/page)?\/(\d+)/);
+    if (latestMatch || path === "/manga" || path === "/" || path === "") {
+      const page = latestMatch ? latestMatch[1] : (url.searchParams.get("page") || "1");
+      const rawTipe = url.searchParams.get("tipe") || url.searchParams.get("type") || "";
+      const tipe = rawTipe.toLowerCase();
+      const tipeParam = (tipe === "manhwa" || tipe === "manhua" || tipe === "manga") ? `?tipe=${tipe}` : "";
+      const apiPath = page === "1"
+        ? (tipeParam ? `/manga/${tipeParam}` : "/manga/")
+        : (tipeParam ? `/manga/page/${page}/${tipeParam}` : `/manga/page/${page}/`);
+      const html = await fetchApi(apiPath);
+      const $ = cheerio.load(html);
+      const manga_list = parseMangaList($, tipe ? (tipe === "manhwa" ? "Manhwa" : tipe === "manhua" ? "Manhua" : "Manga") : undefined);
+
+      return jsonResponse({
+        status: true,
+        message: "success",
+        total: manga_list.length,
+        manga_list,
+      });
+    }
+
+    // ── 7. Search ────────────────────────────────────────────
     // GET /search?q=...
     if (path.includes("/search") || q) {
       const query = q;
-      const html = await fetchApi(`/manga/?post_type=manga&s=${encodeURIComponent(query)}`);
+      const rawTipe = url.searchParams.get("tipe") || url.searchParams.get("type") || "";
+      let apiPath = `/?s=${encodeURIComponent(query)}`;
+      if (rawTipe) {
+        apiPath += `&tipe=${encodeURIComponent(rawTipe)}`;
+      }
+      const html = await fetchApi(apiPath);
       const $ = cheerio.load(html);
       const manga_list = parseMangaList($);
 
@@ -265,12 +311,14 @@ Deno.serve(async (req: Request) => {
       $("#Daftar_Chapter tbody tr").each((_i, el) => {
         const chapter_title = $(el).find("a").text().trim();
         const rawHref = $(el).find("a").attr("href") || "";
+        const released_at = $(el).find(".tanggalseries").text().trim() ||
+          $(el).find("td").eq(2).text().trim();
         const chapter_endpoint = rawHref
           .replace("https://komiku.org/", "")
           .replace(/^\//, "")
           .replace(/\/$/, "");
         if (chapter_title && chapter_endpoint) {
-          chapter.push({ chapter_title, chapter_endpoint });
+          chapter.push({ chapter_title, chapter_endpoint, released_at });
         }
       });
 

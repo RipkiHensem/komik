@@ -6,6 +6,8 @@ import '../models/bookmark.dart';
 class SupabaseAuthService {
   SupabaseClient get _client => Supabase.instance.client;
 
+  static const passwordRecoveryRedirect = 'comicstream://reset-password';
+
   // ── Auth ──────────────────────────────────────────────────
 
   /// Register user baru dengan email & password
@@ -34,14 +36,10 @@ class SupabaseAuthService {
       // Trigger database handle_new_user() sudah otomatis mengisi profiles
     }
 
-    // Pastikan session langsung aktif agar user otomatis masuk (auto-login)
-    if (_client.auth.currentSession == null) {
-      try {
-        await _client.auth.signInWithPassword(
-          email: email,
-          password: password,
-        );
-      } catch (_) {}
+    // Jika konfirmasi email aktif, Supabase belum membuat sesi. Jangan
+    // menganggap user sudah login; arahkan user untuk verifikasi email dulu.
+    if (response.session == null && _client.auth.currentSession == null) {
+      throw Exception('Email not confirmed');
     }
 
     // Ambil data profil (opsional, fallback ke username dari input jika belum siap)
@@ -94,7 +92,9 @@ class SupabaseAuthService {
       if (input.contains('@')) {
         email = input;
       } else {
-        throw Exception('Username atau email tidak ditemukan. Pastikan akun sudah terdaftar atau periksa kembali ejaannya.');
+        throw Exception(
+          'Username atau email tidak ditemukan. Pastikan akun sudah terdaftar atau periksa kembali ejaannya.',
+        );
       }
     }
 
@@ -119,12 +119,13 @@ class SupabaseAuthService {
     } catch (_) {}
 
     final rawUsername = (profile?['username'] as String?)?.trim();
-    final metaUsername = (response.user!.userMetadata?['username'] as String?)?.trim();
+    final metaUsername = (response.user!.userMetadata?['username'] as String?)
+        ?.trim();
     final resolvedUsername = (rawUsername != null && rawUsername.isNotEmpty)
         ? rawUsername
         : (metaUsername != null && metaUsername.isNotEmpty)
-            ? metaUsername
-            : email.split('@').first;
+        ? metaUsername
+        : email.split('@').first;
 
     // Jika username di profiles atau metadata belum tersimpan, otomatis simpan
     if (rawUsername == null || rawUsername.isEmpty) {
@@ -149,10 +150,20 @@ class SupabaseAuthService {
     );
   }
 
-
   /// Logout
   Future<void> logout() async {
     await _client.auth.signOut();
+  }
+
+  Future<void> sendPasswordRecovery(String email) async {
+    await _client.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: passwordRecoveryRedirect,
+    );
+  }
+
+  Future<void> updatePassword(String password) async {
+    await _client.auth.updateUser(UserAttributes(password: password));
   }
 
   /// Cek sesi yang sedang aktif
@@ -165,6 +176,21 @@ class SupabaseAuthService {
       username: supaUser.userMetadata?['username'] as String?,
       createdAt: supaUser.createdAt,
     );
+  }
+
+  /// Admin access is granted only by a database-managed allowlist.
+  /// The matching row is also enforced by RLS for every admin write.
+  Future<bool> isAdmin(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty || _client.auth.currentUser == null)
+      return false;
+
+    final row = await _client
+        .from('admin_users')
+        .select('email')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+    return row != null;
   }
 
   /// Ambil profil user yang lengkap (termasuk avatar dari tabel profiles)
@@ -188,7 +214,10 @@ class SupabaseAuthService {
   }
 
   /// Update profil (username dan/atau avatar URL) di tabel profiles & auth metadata
-  Future<app_models.User?> updateProfile({String? username, String? avatarUrl}) async {
+  Future<app_models.User?> updateProfile({
+    String? username,
+    String? avatarUrl,
+  }) async {
     final supaUser = _client.auth.currentUser;
     if (supaUser == null) throw Exception('Belum login');
 
@@ -377,9 +406,7 @@ class SupabaseAuthService {
         .eq('user_id', supaUser.id)
         .eq('comic_id', comicId);
 
-    return (data as List)
-        .map((row) => row['chapter_id'].toString())
-        .toList();
+    return (data as List).map((row) => row['chapter_id'].toString()).toList();
   }
 
   /// Tandai satu chapter sebagai sudah dibaca

@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../data/providers/providers.dart';
 import '../presentation/screens/auth/login_screen.dart';
 import '../presentation/screens/auth/register_screen.dart';
+import '../presentation/screens/auth/password_recovery_screens.dart';
 import '../presentation/screens/home/home_screen.dart';
 import '../presentation/screens/search/search_screen.dart';
 import '../presentation/screens/detail/comic_detail_screen.dart';
@@ -10,18 +12,30 @@ import '../presentation/screens/reader/reader_screen.dart';
 import '../presentation/screens/bookmark/bookmark_screen.dart';
 import '../presentation/screens/profile/profile_screen.dart';
 import '../presentation/screens/main/main_shell.dart';
+import '../presentation/screens/admin/admin_comics_screen.dart';
 
 bool _initialAppLaunch = true;
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  // Keep one router instance alive. Watching authProvider here recreated
+  // GoRouter whenever login changed to/from loading, resetting navigation to
+  // initialLocation (/home) before the request could finish.
+  final refreshListenable = ValueNotifier<int>(0);
+  ref.listen<AuthState>(authProvider, (previous, next) {
+    if (previous?.status != next.status) {
+      refreshListenable.value++;
+    }
+  });
 
-  return GoRouter(
+  final router = GoRouter(
+    refreshListenable: refreshListenable,
     initialLocation: '/home',
     debugLogDiagnostics: true,
     redirect: (context, state) {
+      final authState = ref.read(authProvider);
       final isAuth = authState.status == AuthStatus.authenticated;
-      final isAuthRoute = state.matchedLocation == '/login' ||
+      final isAuthRoute =
+          state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
 
       // On initial launch or page refresh, go directly into the website (/home)
@@ -45,21 +59,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/',
-        redirect: (context, state) => '/home',
-      ),
-      GoRoute(
-        path: '/splash',
-        redirect: (context, state) => '/home',
-      ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
-      ),
+      GoRoute(path: '/', redirect: (context, state) => '/home'),
+      GoRoute(path: '/splash', redirect: (context, state) => '/home'),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordScreen(),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (context, state) => const ResetPasswordScreen(),
+      ),
+      GoRoute(
+        path: '/admin',
+        builder: (context, state) => const AdminComicsScreen(),
       ),
 
       // Main shell with bottom navigation
@@ -68,27 +85,23 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/home',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: HomeScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: HomeScreen()),
           ),
           GoRoute(
             path: '/search',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: SearchScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: SearchScreen()),
           ),
           GoRoute(
             path: '/bookmarks',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: BookmarkScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: BookmarkScreen()),
           ),
           GoRoute(
             path: '/profile',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: ProfileScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ProfileScreen()),
           ),
         ],
       ),
@@ -96,9 +109,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Detail & Reader (outside shell — no bottom nav)
       GoRoute(
         path: '/comic/:id',
-        builder: (context, state) => ComicDetailScreen(
-          comicId: state.pathParameters['id']!,
-        ),
+        builder: (context, state) =>
+            ComicDetailScreen(comicId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/comic/:comicId/chapter/:chapterId',
@@ -109,4 +121,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  ref.onDispose(() {
+    router.dispose();
+    refreshListenable.dispose();
+  });
+
+  return router;
 });

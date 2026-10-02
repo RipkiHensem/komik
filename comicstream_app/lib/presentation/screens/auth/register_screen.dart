@@ -403,20 +403,20 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     ),
                                   ),
                                   child: isLoading
-                                      ? const SizedBox(
+                                      ? SizedBox(
                                           width: 22,
                                           height: 22,
                                           child: CircularProgressIndicator(
                                             strokeWidth: 2.5,
-                                            color: Colors.white,
+                                            color: AppColors.background,
                                           ),
                                         )
-                                      : const Text(
+                                      : Text(
                                           'Daftar',
                                           style: TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.w600,
-                                            color: Colors.white,
+                                            color: AppColors.background,
                                           ),
                                         ),
                                 ),
@@ -438,7 +438,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 HoverWidget(
                                   scale: 1.08,
                                   onTap: () => context.pushReplacement('/login'),
-                                  child: const Text(
+                                  child: Text(
                                     'Masuk',
                                     style: TextStyle(
                                       color: AppColors.primary,

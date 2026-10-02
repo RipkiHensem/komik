@@ -11,7 +11,7 @@ import '../../widgets/shimmer_loading.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/hover_builder.dart';
 
-/// Search screen with genre filters, format, status, and sorting
+/// Search & Browse screen — supports text search + infinite-scroll category browsing
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
@@ -21,6 +21,7 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   late final TextEditingController _searchController;
+  late final ScrollController _scrollController;
   Timer? _debounceTimer;
   bool _showFilters = false;
 
@@ -30,13 +31,36 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _searchController = TextEditingController(
       text: ref.read(searchStateProvider).query,
     );
+    _scrollController = ScrollController()..addListener(_onScroll);
+
+    // Inisialisasi browse pada pertama kali halaman dibuka
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final s = ref.read(searchStateProvider);
+      ref
+          .read(browseComicsProvider.notifier)
+          .init(format: s.selectedFormat, sortBy: s.sortBy);
+    });
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Trigger load-more saat 85% dari bawah
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    final current = _scrollController.position.pixels;
+    if (current >= maxExtent - 400) {
+      final searchState = ref.read(searchStateProvider);
+      if (searchState.query.isEmpty) {
+        ref.read(browseComicsProvider.notifier).loadMore();
+      }
+    }
   }
 
   void _onSearchChanged(String value) {
@@ -45,8 +69,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       final current = ref.read(searchStateProvider);
       final newQuery = value.trim();
       if (current.query != newQuery) {
-        ref.read(searchStateProvider.notifier).state =
-            current.copyWith(query: newQuery);
+        ref.read(searchStateProvider.notifier).state = current.copyWith(
+          query: newQuery,
+        );
       }
     });
     setState(() {});
@@ -64,6 +89,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _debounceTimer?.cancel();
     _searchController.clear();
     ref.read(searchStateProvider.notifier).state = const SearchState();
+    ref
+        .read(browseComicsProvider.notifier)
+        .init(format: null, sortBy: 'latest');
     setState(() {});
   }
 
@@ -71,12 +99,28 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget build(BuildContext context) {
     final searchState = ref.watch(searchStateProvider);
     final comics = ref.watch(searchComicsProvider);
+    final browseState = ref.watch(browseComicsProvider);
+
+    // Re-init browse saat format atau sort berubah dan tidak sedang search
+    ref.listen<SearchState>(searchStateProvider, (prev, next) {
+      if (next.query.isEmpty) {
+        final formatChanged = prev?.selectedFormat != next.selectedFormat;
+        final sortChanged = prev?.sortBy != next.sortBy;
+        if (formatChanged || sortChanged) {
+          ref
+              .read(browseComicsProvider.notifier)
+              .init(format: next.selectedFormat, sortBy: next.sortBy);
+        }
+      }
+    });
 
     // Keep controller in sync if query changed externally
     if (_searchController.text != searchState.query &&
         !FocusScope.of(context).hasFocus) {
       _searchController.text = searchState.query;
     }
+
+    final isSearchMode = searchState.query.isNotEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -129,15 +173,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                 )
                               : null,
                           border: InputBorder.none,
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 14),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                          ),
                         ),
                         onChanged: _onSearchChanged,
                         onSubmitted: (value) {
                           _debounceTimer?.cancel();
                           final current = ref.read(searchStateProvider);
-                          ref.read(searchStateProvider.notifier).state =
-                              current.copyWith(query: value.trim());
+                          ref.read(searchStateProvider.notifier).state = current
+                              .copyWith(query: value.trim());
                         },
                       ),
                     ),
@@ -168,7 +213,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           Icon(
                             Icons.tune_rounded,
                             size: 20,
-                            color: (_showFilters || searchState.hasActiveFilters)
+                            color:
+                                (_showFilters || searchState.hasActiveFilters)
                                 ? AppColors.primary
                                 : AppColors.textMuted,
                           ),
@@ -179,7 +225,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               child: Container(
                                 width: 8,
                                 height: 8,
-                                decoration: const BoxDecoration(
+                                decoration: BoxDecoration(
                                   color: AppColors.primary,
                                   shape: BoxShape.circle,
                                 ),
@@ -205,21 +251,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               child: Row(
                 children: [
                   Text(
-                    comics.when(
-                      data: (list) => searchState.selectedGenres.isNotEmpty
-                          ? 'Genre "${searchState.selectedGenres.join(", ")}": ${list.length} komik'
-                          : '${list.length} komik ditemukan',
-                      loading: () => 'Memuat komik...',
-                      error: (_, _) => 'Gagal memuat',
-                    ),
+                    isSearchMode
+                        ? comics.when(
+                            data: (list) =>
+                                '${list.length} hasil untuk "${searchState.query}"',
+                            loading: () => 'Mencari...',
+                            error: (_, _) => 'Gagal memuat',
+                          )
+                        : browseState.isLoading && browseState.comics.isEmpty
+                        ? 'Memuat komik...'
+                        : '${browseState.comics.length} komik${browseState.hasMore ? '+' : ''}',
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight: searchState.selectedGenres.isNotEmpty
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                      color: searchState.selectedGenres.isNotEmpty
-                          ? AppColors.textPrimary
-                          : AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
                     ),
                   ),
                   if (searchState.hasActiveFilters) ...[
@@ -236,7 +281,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           color: AppColors.primary.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
@@ -295,10 +340,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                             value: 'rating',
                             child: Text('Rating'),
                           ),
-                          DropdownMenuItem(
-                            value: 'title',
-                            child: Text('A-Z'),
-                          ),
+                          DropdownMenuItem(value: 'title', child: Text('A-Z')),
                         ],
                         onChanged: (value) {
                           if (value != null) {
@@ -315,69 +357,163 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
             // ── Results Grid ──────────────────────────────────
             Expanded(
-              child: comics.when(
-                data: (comicList) {
-                  if (comicList.isEmpty) {
-                    return EmptyView(
-                      title: 'Tidak ada komik ditemukan',
-                      subtitle: searchState.hasActiveFilters
-                          ? (searchState.query.isNotEmpty
-                              ? 'Tidak ada komik yang cocok dengan "${searchState.query}".'
-                              : 'Tidak ada komik dengan filter yang dipilih.')
-                          : 'Belum ada komik yang tersedia.',
-                      icon: Icons.search_off_rounded,
-                      action: searchState.hasActiveFilters
-                          ? ElevatedButton.icon(
-                              onPressed: _resetAllFilters,
-                              icon: const Icon(
-                                Icons.restart_alt_rounded,
-                                size: 18,
-                              ),
-                              label: const Text('Tampilkan Semua Komik'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                            )
-                          : null,
-                    );
-                  }
-                  return GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 200,
-                      childAspectRatio: 0.62,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 10,
-                    ),
-                    itemCount: comicList.length,
-                    itemBuilder: (context, index) {
-                      return ComicCard(
-                        comic: comicList[index],
-                        onTap: () =>
-                            context.go('/comic/${comicList[index].id}'),
-                      );
-                    },
-                  );
-                },
-                loading: () => const ComicGridShimmer(),
-                error: (error, _) => ErrorView(
-                  message: 'Gagal memuat hasil pencarian',
-                  onRetry: () => ref.invalidate(searchComicsProvider),
-                ),
-              ),
+              child: isSearchMode
+                  ? _buildSearchResults(comics, searchState)
+                  : _buildBrowseResults(browseState),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Hasil pencarian teks (non-paginated)
+  Widget _buildSearchResults(
+    AsyncValue<List<dynamic>> comics,
+    SearchState searchState,
+  ) {
+    return comics.when(
+      data: (comicList) {
+        if (comicList.isEmpty) {
+          return EmptyView(
+            title: 'Tidak ada komik ditemukan',
+            subtitle:
+                'Tidak ada komik yang cocok dengan "${searchState.query}".',
+            icon: Icons.search_off_rounded,
+            action: ElevatedButton.icon(
+              onPressed: _clearSearch,
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('Hapus Pencarian'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.background,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          );
+        }
+        return GridView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 200,
+            childAspectRatio: 0.42,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 24,
+          ),
+          itemCount: comicList.length,
+          itemBuilder: (context, index) {
+            final comic = comicList[index];
+            return ComicCard(
+              comic: comic,
+              onTap: () => context.go('/comic/${comic.id}'),
+            );
+          },
+        );
+      },
+      loading: () => const ComicGridShimmer(),
+      error: (error, _) => ErrorView(
+        message: 'Gagal memuat hasil pencarian',
+        onRetry: () => ref.invalidate(searchComicsProvider),
+      ),
+    );
+  }
+
+  /// Browse mode dengan infinite scroll
+  Widget _buildBrowseResults(BrowseState browseState) {
+    // Sedang loading halaman pertama
+    if (browseState.comics.isEmpty && browseState.isLoading) {
+      return const ComicGridShimmer();
+    }
+
+    // Error dan tidak ada data
+    if (browseState.comics.isEmpty && browseState.error != null) {
+      return ErrorView(
+        message: 'Gagal memuat komik',
+        onRetry: () {
+          final s = ref.read(searchStateProvider);
+          ref
+              .read(browseComicsProvider.notifier)
+              .init(format: s.selectedFormat, sortBy: s.sortBy);
+        },
+      );
+    }
+
+    // Tidak ada komik sama sekali
+    if (browseState.comics.isEmpty) {
+      return EmptyView(
+        title: 'Belum ada komik',
+        subtitle: 'Belum ada komik yang tersedia di kategori ini.',
+        icon: Icons.auto_stories_outlined,
+        action: ElevatedButton.icon(
+          onPressed: _resetAllFilters,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Tampilkan Semua'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: AppColors.background,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Jumlah item: semua komik + 1 slot untuk loader di bawah (jika masih ada)
+    final hasLoader = browseState.hasMore || browseState.isLoading;
+    final itemCount = browseState.comics.length + (hasLoader ? 1 : 0);
+
+    return GridView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200,
+        childAspectRatio: 0.42,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 24,
+      ),
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        // Slot terakhir = loading indicator
+        if (index >= browseState.comics.length) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Memuat lebih banyak...',
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final comic = browseState.comics[index];
+        return ComicCard(
+          comic: comic,
+          onTap: () => context.go('/comic/${comic.id}'),
+        );
+      },
     );
   }
 
@@ -388,10 +524,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       decoration: BoxDecoration(
         color: AppColors.surfaceLight.withValues(alpha: 0.65),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.glassBorder,
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.glassBorder, width: 1),
         boxShadow: AppColors.cardShadow,
       ),
       child: Column(
@@ -415,7 +548,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   child: InkWell(
                     onTap: _resetAllFilters,
                     borderRadius: BorderRadius.circular(4),
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       child: Text(
                         'Reset Semua',
@@ -457,8 +590,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   } else {
                     genres.add(genre);
                   }
-                  ref.read(searchStateProvider.notifier).state =
-                      searchState.copyWith(selectedGenres: genres);
+                  ref.read(searchStateProvider.notifier).state = searchState
+                      .copyWith(selectedGenres: genres);
                 },
               );
             }).toList(),
@@ -490,12 +623,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           label: format,
                           isSelected: searchState.selectedFormat == format,
                           onTap: () {
-                            ref.read(searchStateProvider.notifier).state =
-                                searchState.copyWith(
+                            ref
+                                .read(searchStateProvider.notifier)
+                                .state = searchState.copyWith(
                               selectedFormat:
                                   searchState.selectedFormat == format
-                                      ? null
-                                      : format,
+                                  ? null
+                                  : format,
                             );
                           },
                         );
@@ -526,12 +660,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           label: status,
                           isSelected: searchState.selectedStatus == status,
                           onTap: () {
-                            ref.read(searchStateProvider.notifier).state =
-                                searchState.copyWith(
+                            ref
+                                .read(searchStateProvider.notifier)
+                                .state = searchState.copyWith(
                               selectedStatus:
                                   searchState.selectedStatus == status
-                                      ? null
-                                      : status,
+                                  ? null
+                                  : status,
                             );
                           },
                         );

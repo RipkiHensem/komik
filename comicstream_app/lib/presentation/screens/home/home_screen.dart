@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +10,7 @@ import '../../widgets/shimmer_loading.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/hover_builder.dart';
 
-/// World-class modern Home screen with hero showcase and refined sections
+/// Home screen for popular comics and paged latest updates.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -20,534 +19,360 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final PageController _heroPageController = PageController(
-    viewportFraction: 0.92,
-  );
   final ScrollController _homeScrollController = ScrollController();
-  int _currentHeroPage = 0;
+  static const int _latestPageSize = 8;
+  static const double _latestGridMaxWidth = 440;
+  static const double _mobileAppMaxWidth = 480;
+  int _latestPage = 0;
   String? _selectedFormat;
-
-  Timer? _heroAutoSlideTimer;
-  int _featuredHeroCount = 0;
-  bool _isHeroHovered = false;
-  static const Duration _autoSlideInterval = Duration(seconds: 5);
-
-  void _startHeroAutoPlay(int count) {
-    _featuredHeroCount = count;
-    if (count <= 1) return;
-    _heroAutoSlideTimer?.cancel();
-    _heroAutoSlideTimer = Timer.periodic(_autoSlideInterval, (timer) {
-      if (!mounted || !_heroPageController.hasClients || _featuredHeroCount <= 1 || _isHeroHovered) {
-        return;
-      }
-      final nextPage = (_currentHeroPage + 1) % _featuredHeroCount;
-      _heroPageController.animateToPage(
-        nextPage,
-        duration: const Duration(milliseconds: 700),
-        curve: Curves.easeInOutCubic,
-      );
-    });
-  }
-
-  void _stopHeroAutoPlay() {
-    _heroAutoSlideTimer?.cancel();
-    _heroAutoSlideTimer = null;
-  }
-
-  void _resetHeroAutoPlay() {
-    if (_featuredHeroCount > 1 && !_isHeroHovered) {
-      _startHeroAutoPlay(_featuredHeroCount);
-    }
-  }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.invalidate(popularComicsByFormatProvider(null));
-      ref.invalidate(latestComicsByFormatProvider(null));
-    });
   }
 
   @override
   void dispose() {
-    _heroAutoSlideTimer?.cancel();
-    _heroPageController.dispose();
     _homeScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final popularComics = ref.watch(popularComicsByFormatProvider(_selectedFormat));
-    final latestComics = ref.watch(latestComicsByFormatProvider(_selectedFormat));
+    final popularComics = ref.watch(
+      popularComicsByFormatProvider(_selectedFormat),
+    );
+    final homeComicsState = ref.watch(homeComicsProvider(_selectedFormat));
     final authUser = ref.watch(authProvider).user;
     final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth >= 768;
+    final appWidth = screenWidth.clamp(0.0, _mobileAppMaxWidth);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Scrollbar(
-        controller: _homeScrollController,
-        thumbVisibility: true,
-        trackVisibility: true,
-        interactive: true,
-        thickness: 8.0,
-        radius: const Radius.circular(6.0),
-        child: RefreshIndicator(
-          color: AppColors.primary,
-          backgroundColor: AppColors.surface,
-          onRefresh: () async {
-            _stopHeroAutoPlay();
-            ref.invalidate(popularComicsByFormatProvider(_selectedFormat));
-            ref.invalidate(latestComicsByFormatProvider(_selectedFormat));
-          },
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-            child: CustomScrollView(
-              controller: _homeScrollController,
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            slivers: [
-              // ── Modern Floating App Bar ──────────────────────────────
-              SliverAppBar(
-                floating: true,
-                pinned: false,
-                backgroundColor: AppColors.background.withValues(alpha: 0.95),
-                surfaceTintColor: Colors.transparent,
-                elevation: 0,
-                scrolledUnderElevation: 0,
-                titleSpacing: isDesktop ? 20 : 16,
-                title: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Brand Icon with glowing gradient
-                    Container(
-                      width: isDesktop ? 36 : 32,
-                      height: isDesktop ? 36 : 32,
-                      decoration: BoxDecoration(
-                        gradient: AppColors.primaryGradient,
-                        borderRadius: BorderRadius.circular(isDesktop ? 10 : 8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withValues(alpha: 0.4),
-                            blurRadius: 12,
-                            offset: const Offset(0, 3),
+      body: Center(
+        child: SizedBox(
+          width: appWidth,
+          child: RefreshIndicator(
+              color: AppColors.primary,
+              backgroundColor: AppColors.surface,
+              onRefresh: () async {
+                setState(() => _latestPage = 0);
+                ref.invalidate(popularComicsByFormatProvider(_selectedFormat));
+                await ref
+                    .read(homeComicsProvider(_selectedFormat).notifier)
+                    .loadInitial();
+              },
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: CustomScrollView(
+                  controller: _homeScrollController,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  slivers: [
+                    // ── Modern Floating App Bar ──────────────────────────────
+                    SliverAppBar(
+                      floating: true,
+                      pinned: false,
+                      backgroundColor: AppColors.background.withValues(
+                        alpha: 0.95,
+                      ),
+                      surfaceTintColor: Colors.transparent,
+                      elevation: 0,
+                      scrolledUnderElevation: 0,
+                      titleSpacing: 16,
+                      title: Row(
+                        children: [
+                          Icon(Icons.auto_stories_outlined, size: 28, color: AppColors.textPrimary),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'ComicStream',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                      child: Icon(
-                        Icons.auto_stories_rounded,
-                        size: isDesktop ? 20 : 18,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        'ComicStream',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: isDesktop ? 21 : 18,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.6,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                actions: [
-                  // Modern search capsule (desktop) or circular icon button (mobile)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: HoverWidget(
-                      scale: 1.05,
-                      enableGlow: true,
-                      borderRadius: BorderRadius.circular(18),
-                      onTap: () {
-                        ref.read(searchStateProvider.notifier).state =
-                            const SearchState();
-                        context.go('/search');
-                      },
-                      child: Container(
-                        height: 36,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isDesktop ? 14 : 9,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: AppColors.glassBorder,
-                            width: 0.8,
+                      actions: [
+                        // Modern search capsule (desktop) or circular icon button (mobile)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: HoverWidget(
+                            scale: 0.98,
+                            duration: const Duration(milliseconds: 150),
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () {
+                              ref.read(searchStateProvider.notifier).state =
+                                  const SearchState();
+                              context.go('/search');
+                            },
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              alignment: Alignment.center,
+                              child: Icon(Icons.search, size: 22, color: AppColors.textSecondary),
+                            ),
                           ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.search_rounded,
-                              size: 18,
-                              color: AppColors.textSecondary,
-                            ),
-                            if (isDesktop) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                'Cari komik...',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.textMuted,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // In-App Login or User Avatar
-                  Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: authUser == null
-                        ? HoverWidget(
-                            scale: 1.05,
-                            enableGlow: true,
-                            borderRadius: BorderRadius.circular(18),
-                            onTap: () => context.push('/login'),
-                            child: Container(
-                              height: 36,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                gradient: AppColors.primaryGradient,
-                                borderRadius: BorderRadius.circular(18),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.primary.withValues(alpha: 0.35),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.login_rounded,
-                                    size: 15,
-                                    color: Colors.white,
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    'Masuk',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
+                        // In-App Login or User Avatar
+                        Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: authUser == null
+                              ? HoverWidget(
+                                  scale: 0.98,
+                                  duration: const Duration(milliseconds: 150),
+                                  borderRadius: BorderRadius.circular(18),
+                                  onTap: () => context.push('/login'),
+                                  child: Container(
+                                    height: 44,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        : HoverWidget(
-                            scale: 1.08,
-                            borderRadius: BorderRadius.circular(17),
-                            onTap: () => context.go('/profile'),
-                            child: Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: AppColors.primary,
-                                  width: 1.5,
-                                ),
-                                color: AppColors.surface,
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: (authUser.avatarUrl != null &&
-                                      authUser.avatarUrl!.isNotEmpty)
-                                  ? Image.network(
-                                      authUser.avatarUrl!,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) => Center(
-                                        child: Text(
-                                          authUser.username.isNotEmpty
-                                              ? authUser.username[0].toUpperCase()
-                                              : 'U',
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.login_rounded,
+                                          size: 15,
+                                          color: AppColors.background,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          'Masuk',
                                           style: GoogleFonts.plusJakartaSans(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.primary,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.background,
                                           ),
                                         ),
-                                      ),
-                                    )
-                                  : Center(
-                                      child: Text(
-                                        authUser.username.isNotEmpty
-                                              ? authUser.username[0].toUpperCase()
-                                              : 'U',
-                                        style: GoogleFonts.plusJakartaSans(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                          color: AppColors.primary,
-                                        ),
-                                      ),
+                                      ],
                                     ),
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-
-              // ── Hero Showcase Carousel ────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 4),
-                  child: popularComics.when(
-                    data: (comics) => _buildHeroCarousel(comics),
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: ShimmerLoading(height: 220, borderRadius: 20),
-                    ),
-                    error: (_, _) => const SizedBox.shrink(),
-                  ),
-                ),
-              ),
-
-              // ── Quick Category Pills ──────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: [
-                        _buildQuickFilterPill('⚡ Semua', null),
-                        const SizedBox(width: 8),
-                        _buildQuickFilterPill('🇰🇷 Manhwa', 'Manhwa'),
-                        const SizedBox(width: 8),
-                        _buildQuickFilterPill('🇯🇵 Manga', 'Manga'),
-                        const SizedBox(width: 8),
-                        _buildQuickFilterPill('🇨🇳 Manhua', 'Manhua'),
+                                  ),
+                                )
+                              : HoverWidget(
+                                  scale: 1.08,
+                                  borderRadius: BorderRadius.circular(17),
+                                  onTap: () => context.go('/profile'),
+                                  child: Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: AppColors.border,
+                                        width: 1,
+                                      ),
+                                      color: AppColors.surface,
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child:
+                                        (authUser.avatarUrl != null &&
+                                            authUser.avatarUrl!.isNotEmpty)
+                                        ? Image.network(
+                                            authUser.avatarUrl!,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (
+                                                  context,
+                                                  error,
+                                                  stackTrace,
+                                                ) => Center(
+                                                  child: Text(
+                                                    authUser.username.isNotEmpty
+                                                        ? authUser.username[0]
+                                                              .toUpperCase()
+                                                        : 'U',
+                                                    style:
+                                                        GoogleFonts.plusJakartaSans(
+                                                          fontSize: 13,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                          color:
+                                                              AppColors.primary,
+                                                        ),
+                                                  ),
+                                                ),
+                                          )
+                                        : Center(
+                                            child: Text(
+                                              authUser.username.isNotEmpty
+                                                  ? authUser.username[0]
+                                                        .toUpperCase()
+                                                  : 'U',
+                                              style:
+                                                  GoogleFonts.plusJakartaSans(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: AppColors.primary,
+                                                  ),
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                        ),
                       ],
                     ),
-                  ),
-                ),
-              ),
 
-              // ── Section: Populer ──────────────────────────────────────
-              SliverToBoxAdapter(
-                child: _buildSectionHeader(
-                  title: _selectedFormat != null ? 'Populer $_selectedFormat' : 'Populer Minggu Ini',
-                  tag: _selectedFormat != null ? _selectedFormat!.toUpperCase() : 'HOT',
-                  onSeeAll: () {
-                    ref.read(searchStateProvider.notifier).state = SearchState(
-                      sortBy: 'popular',
-                      selectedFormat: _selectedFormat,
-                    );
-                    context.go('/search');
-                  },
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: popularComics.when(
-                  data: (comics) => _buildHorizontalList(comics.take(7).toList()),
-                  loading: () => _buildHorizontalShimmer(),
-                  error: (error, _) => ErrorView(
-                    message: 'Gagal memuat komik populer',
-                    onRetry: () => ref.invalidate(popularComicsByFormatProvider(_selectedFormat)),
-                  ),
-                ),
-              ),
+                    // ── Section: Populer ──────────────────────────────────────
+                    SliverToBoxAdapter(
+                      child: _buildSectionHeader(
+                        title: _selectedFormat != null
+                            ? 'Populer $_selectedFormat'
+                            : 'Populer Minggu Ini',
+                        tag: _selectedFormat != null
+                            ? _selectedFormat!.toUpperCase()
+                            : 'HOT',
+                        onSeeAll: () {
+                          ref
+                              .read(searchStateProvider.notifier)
+                              .state = SearchState(
+                            sortBy: 'popular',
+                            selectedFormat: _selectedFormat,
+                          );
+                          context.go('/search');
+                        },
+                      ),
+                    ),
 
-              // ── Section: Update Terbaru ───────────────────────────────
-              SliverToBoxAdapter(
-                child: _buildSectionHeader(
-                  title: _selectedFormat != null ? 'Update $_selectedFormat Terbaru' : 'Update Terbaru',
-                  tag: 'LIVE',
-                  onSeeAll: () {
-                    ref.read(searchStateProvider.notifier).state = SearchState(
-                      sortBy: 'latest',
-                      selectedFormat: _selectedFormat,
-                    );
-                    context.go('/search');
-                  },
+                    // ── Quick Category Pills ──────────────────────────────────
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          child: Row(
+                            children: [
+                              _buildQuickFilterPill('Semua', null),
+                              const SizedBox(width: 8),
+                              _buildQuickFilterPill('Manhwa', 'Manhwa'),
+                              const SizedBox(width: 8),
+                              _buildQuickFilterPill('Manga', 'Manga'),
+                              const SizedBox(width: 8),
+                              _buildQuickFilterPill('Manhua', 'Manhua'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: popularComics.when(
+                        data: (comics) =>
+                            _buildHorizontalList(comics.take(7).toList()),
+                        loading: () => _buildHorizontalShimmer(),
+                        error: (error, _) => ErrorView(
+                          message: 'Gagal memuat komik populer',
+                          onRetry: () => ref.invalidate(
+                            popularComicsByFormatProvider(_selectedFormat),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── Section: Update Terbaru ───────────────────────────────
+                    SliverToBoxAdapter(
+                      child: _buildSectionHeader(
+                        title: _selectedFormat != null
+                            ? 'Update $_selectedFormat Terbaru'
+                            : 'Update Terbaru',
+                        tag: _selectedFormat == null ? 'LIVE' : null,
+                        onSeeAll: () {
+                          ref
+                              .read(searchStateProvider.notifier)
+                              .state = SearchState(
+                            sortBy: 'latest',
+                            selectedFormat: _selectedFormat,
+                          );
+                          context.go('/search');
+                        },
+                      ),
+                    ),
+                    if (homeComicsState.isLoading &&
+                        homeComicsState.comics.isEmpty)
+                      const SliverToBoxAdapter(child: ComicGridShimmer())
+                    else if (homeComicsState.error != null &&
+                        homeComicsState.comics.isEmpty)
+                      SliverToBoxAdapter(
+                        child: ErrorView(
+                          message: 'Gagal memuat update terbaru',
+                          onRetry: () => ref
+                              .read(
+                                homeComicsProvider(_selectedFormat).notifier,
+                              )
+                              .loadInitial(),
+                        ),
+                      )
+                    else ...[
+                      _buildComicGrid(
+                        homeComicsState.comics
+                            .skip(_latestPage * _latestPageSize)
+                            .take(_latestPageSize)
+                            .toList(),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _buildLatestPagination(homeComicsState),
+                      ),
+                    ],
+
+                    // Bottom padding to avoid floating dock collision
+                    const SliverToBoxAdapter(child: SizedBox(height: 88)),
+                  ],
                 ),
               ),
-              latestComics.when(
-                data: (comics) => _buildComicGrid(comics),
-                loading: () => const SliverToBoxAdapter(
-                  child: ComicGridShimmer(),
-                ),
-                error: (error, _) => SliverToBoxAdapter(
-                  child: ErrorView(
-                    message: 'Gagal memuat update terbaru',
-                    onRetry: () => ref.invalidate(latestComicsByFormatProvider(_selectedFormat)),
-                  ),
-                ),
-              ),
-
-              // Bottom padding to avoid floating dock collision
-              const SliverToBoxAdapter(
-                child: SizedBox(height: 110),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-  }
-
-  Widget _buildQuickFilterPill(String label, String? format) {
-    final isSelected = _selectedFormat == format;
-
-    return HoverWidget(
-      scale: 1.06,
-      enableGlow: isSelected,
-      glowColor: AppColors.primary,
-      borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        if (_selectedFormat != format) {
-          setState(() {
-            _selectedFormat = format;
-            _currentHeroPage = 0;
-          });
-          if (_heroPageController.hasClients) {
-            _heroPageController.jumpToPage(0);
-          }
-          _resetHeroAutoPlay();
-        }
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          gradient: isSelected ? AppColors.primaryGradient : null,
-          color: isSelected ? null : AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? Colors.transparent : AppColors.glassBorder,
-            width: 0.8,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.4),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-            color: isSelected ? Colors.white : AppColors.textPrimary,
           ),
         ),
       ),
     );
   }
 
-  /// Hero carousel with featured comics
-  Widget _buildHeroCarousel(List<Comic> comics) {
-    if (comics.isEmpty) return const SizedBox.shrink();
-    final featured = comics.take(5).toList();
+  Widget _buildQuickFilterPill(String label, String? format) {
+    final isSelected = _selectedFormat == format;
 
-    // Start auto-play timer when comics are available or count changes
-    if (_featuredHeroCount != featured.length || _heroAutoSlideTimer == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _startHeroAutoPlay(featured.length);
-        }
-      });
-    }
-
-    return MouseRegion(
-      onEnter: (_) {
-        _isHeroHovered = true;
-      },
-      onExit: (_) {
-        _isHeroHovered = false;
-        _resetHeroAutoPlay();
-      },
-      child: Column(
-        children: [
-          SizedBox(
-            height: 220,
-            child: PageView.builder(
-              controller: _heroPageController,
-              itemCount: featured.length,
-              onPageChanged: (index) {
-                setState(() => _currentHeroPage = index);
-                _resetHeroAutoPlay();
-              },
-              itemBuilder: (context, index) {
-                return ComicCardHero(
-                  comic: featured[index],
-                  onTap: () => context.go('/comic/${featured[index].id}'),
-                );
-              },
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: label,
+      child: HoverWidget(
+        scale: 0.98,
+        duration: const Duration(milliseconds: 150),
+        borderRadius: BorderRadius.circular(999),
+        onTap: () {
+          if (_selectedFormat == format) return;
+          setState(() {
+            _selectedFormat = format;
+            _latestPage = 0;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primary : AppColors.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: AppColors.border, width: 1),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+              color: isSelected ? AppColors.background : AppColors.textSecondary,
             ),
           ),
-          const SizedBox(height: 12),
-          // Page indicators with animated capsules & interactive click support
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(featured.length, (index) {
-              final isCurrent = index == _currentHeroPage;
-              return GestureDetector(
-                onTap: () {
-                  _heroPageController.animateToPage(
-                    index,
-                    duration: const Duration(milliseconds: 500),
-                    curve: Curves.easeInOutCubic,
-                  );
-                  _resetHeroAutoPlay();
-                },
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    color: Colors.transparent,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOutCubic,
-                      width: isCurrent ? 26 : 7,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        gradient: isCurrent ? AppColors.primaryGradient : null,
-                        color: isCurrent ? null : AppColors.textMuted.withValues(alpha: 0.25),
-                        borderRadius: BorderRadius.circular(3),
-                        boxShadow: isCurrent
-                            ? [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.45),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 1),
-                                ),
-                              ]
-                            : null,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -570,7 +395,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return SizedBox(
-      height: 255,
+      height: 372,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
@@ -580,7 +405,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           return Padding(
             padding: const EdgeInsets.only(right: 12),
             child: SizedBox(
-              width: 135,
+              width: 150,
               child: ComicCard(
                 comic: displayComics[index],
                 onTap: () => context.go('/comic/${displayComics[index].id}'),
@@ -592,44 +417,135 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// Grid of comic cards
-  SliverPadding _buildComicGrid(List<Comic> comics) {
+  /// Two-card grid with a capped width so the right side stays open.
+  Widget _buildComicGrid(List<Comic> comics) {
     if (comics.isEmpty) {
-      return SliverPadding(
-        padding: const EdgeInsets.all(32),
-        sliver: SliverToBoxAdapter(
-          child: Center(
-            child: Text(
-              _selectedFormat != null
-                  ? 'Belum ada update untuk $_selectedFormat'
-                  : 'Belum ada update',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-            ),
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'Belum ada update',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
           ),
         ),
       );
     }
 
-    return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 200,
-          childAspectRatio: 0.60,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 14,
-        ),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            return ComicCard(
-              comic: comics[index],
-              onTap: () => context.go('/comic/${comics[index].id}'),
-            );
-          },
-          childCount: comics.length,
+    final availableWidth = MediaQuery.sizeOf(context).width - 32;
+    final gridWidth = availableWidth.clamp(0.0, _latestGridMaxWidth);
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Align(
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: gridWidth,
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 0.42,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 24,
+              ),
+              itemCount: comics.length,
+              itemBuilder: (context, index) => ComicCard(
+                comic: comics[index],
+                onTap: () => context.go('/comic/${comics[index].id}'),
+              ),
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  Widget _buildLatestPagination(HomeComicsState state) {
+    final nextPageStart = (_latestPage + 1) * _latestPageSize;
+    final canGoNext = nextPageStart < state.comics.length || state.hasMore;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    textStyle: const TextStyle(fontSize: 11),
+                    minimumSize: const Size(44, 44),
+                  ),
+                  onPressed: _latestPage > 0 && !state.isLoadingMore
+                      ? () => setState(() => _latestPage--)
+                      : null,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Sebelumnya'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 48,
+                child: Center(
+                  child: Text(
+                    '${_latestPage + 1}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    textStyle: const TextStyle(fontSize: 11),
+                    minimumSize: const Size(44, 44),
+                  ),
+                  onPressed: canGoNext && !state.isLoadingMore
+                      ? () => _goToNextLatestPage(state)
+                      : null,
+                  icon: state.isLoadingMore
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.chevron_right_rounded),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('Berikutnya'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _goToNextLatestPage(HomeComicsState state) async {
+    final nextPage = _latestPage + 1;
+    final requiredCount = (nextPage + 1) * _latestPageSize;
+    if (state.comics.length < requiredCount && state.hasMore) {
+      await ref.read(homeComicsProvider(_selectedFormat).notifier).loadMore();
+    }
+    if (!mounted) return;
+    final updated = ref.read(homeComicsProvider(_selectedFormat));
+    if (updated.comics.length > nextPage * _latestPageSize) {
+      setState(() => _latestPage = nextPage);
+    }
   }
 
   /// Refined section header with title, badge tag, and circular arrow CTA
@@ -639,85 +555,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     VoidCallback? onSeeAll,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 32, 16, 12),
       child: Row(
         children: [
-          // Subtle vertical accent bar
-          Container(
-            width: 3.5,
-            height: 18,
-            decoration: BoxDecoration(
-              gradient: AppColors.primaryGradient,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
               title,
               style: TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
+                fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+              overflow: TextOverflow.visible,
             ),
           ),
           if (tag != null) ...[
             const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-              decoration: BoxDecoration(
-                color: AppColors.primarySurface,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                tag,
-                style: const TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.4,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-          ],
-          const Spacer(),
-          if (onSeeAll != null)
-            HoverWidget(
-              scale: 1.06,
-              borderRadius: BorderRadius.circular(14),
-              onTap: onSeeAll,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: AppColors.glassBorder,
-                    width: 0.6,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.circle, size: 6, color: AppColors.textMuted),
+                const SizedBox(width: 5),
+                Text(
+                  tag,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
+              ],
+            ),
+          ],
+          if (onSeeAll != null)
+            HoverWidget(
+              scale: 0.98,
+              duration: const Duration(milliseconds: 150),
+              borderRadius: BorderRadius.circular(999),
+              onTap: onSeeAll,
+              child: SizedBox(
+                height: 44,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                    Text(
                       'Semua',
                       style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      size: 10,
-                      color: AppColors.primary,
+                    Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: AppColors.textSecondary,
                     ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -728,7 +627,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildHorizontalShimmer() {
     return SizedBox(
-      height: 240,
+      height: 372,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -736,10 +635,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         itemBuilder: (context, index) {
           return const Padding(
             padding: EdgeInsets.only(right: 12),
-            child: SizedBox(
-              width: 135,
-              child: ComicCardShimmer(),
-            ),
+            child: SizedBox(width: 135, child: ComicCardShimmer()),
           );
         },
       ),

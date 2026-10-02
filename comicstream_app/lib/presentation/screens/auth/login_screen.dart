@@ -218,8 +218,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           .withValues(alpha: 0.8),
                                     ),
                                   ),
-                                  const SizedBox(height: 24),
-
                                   // Error banner
                                   if (_errorMessage != null) ...[
                                     Container(
@@ -360,7 +358,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       return null;
                                     },
                                   ),
-                                  const SizedBox(height: 24),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton(
+                                      onPressed: () =>
+                                          context.push('/forgot-password'),
+                                      child: Text(
+                                        'Lupa password?',
+                                        style: TextStyle(
+                                          color: AppColors.textSecondary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
 
                                   // Tombol Masuk
                                   HoverWidget(
@@ -381,21 +393,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           ),
                                         ),
                                         child: isLoading
-                                            ? const SizedBox(
+                                            ? SizedBox(
                                                 width: 22,
                                                 height: 22,
                                                 child:
                                                     CircularProgressIndicator(
                                                   strokeWidth: 2.5,
-                                                  color: Colors.white,
+                                                  color: AppColors.background,
                                                 ),
                                               )
-                                            : const Text(
+                                            : Text(
                                                 'Masuk',
                                                 style: TextStyle(
                                                   fontSize: 15,
                                                   fontWeight: FontWeight.w600,
-                                                  color: Colors.white,
+                                                  color: AppColors.background,
                                                 ),
                                               ),
                                       ),

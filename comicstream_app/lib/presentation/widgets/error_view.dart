@@ -59,7 +59,7 @@ class ErrorView extends StatelessWidget {
                   label: const Text('Coba Lagi'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: AppColors.background,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,
                       vertical: 12,

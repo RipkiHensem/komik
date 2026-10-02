@@ -44,7 +44,9 @@ class MangaApiService {
             return handler.next(options);
           },
           onError: (error, handler) {
-            debugPrint('MANGA API ✖ ${error.response?.statusCode} ${error.message}');
+            debugPrint(
+              'MANGA API ✖ ${error.response?.statusCode} ${error.message}',
+            );
             return handler.next(error);
           },
         ),
@@ -54,32 +56,59 @@ class MangaApiService {
 
   // ── Comics List ───────────────────────────────────────────
 
-  /// Ambil daftar manga terbaru
-  Future<List<Comic>> getLatestManga({int page = 1}) async {
-    final response = await _dio.get(page == 1 ? '/manga' : '/manga/page/$page');
+  /// Ambil daftar manga terbaru (bisa difilter format: 'Manhwa', 'Manhua', 'Manga', atau null untuk Semua)
+  Future<List<Comic>> getLatestManga({int page = 1, String? format}) async {
+    String path;
+    if (format == 'Manhwa') {
+      path = page == 1 ? '/manhwa' : '/manhwa/page/$page';
+    } else if (format == 'Manhua') {
+      path = page == 1 ? '/manhua' : '/manhua/page/$page';
+    } else if (format == 'Manga') {
+      path = page == 1 ? '/manga/japan' : '/manga/japan/page/$page';
+    } else {
+      path = page == 1 ? '/manga' : '/manga/page/$page';
+    }
+    final response = await _dio.get(path);
     final data = _extractList(response.data, 'manga_list');
     return data.map((json) => Comic.fromListJson(json)).toList();
   }
 
-  /// Ambil daftar manga populer
-  Future<List<Comic>> getPopularManga({int page = 1}) async {
-    final response = await _dio.get(page == 1 ? '/manga/popular' : '/manga/popular/$page');
+  /// Ambil daftar manga populer (bisa difilter format: 'Manhwa', 'Manhua', 'Manga', atau null untuk Semua)
+  Future<List<Comic>> getPopularManga({int page = 1, String? format}) async {
+    String path;
+    if (format == 'Manhwa') {
+      path = page == 1
+          ? '/manga/popular?tipe=manhwa'
+          : '/manga/popular/$page?tipe=manhwa';
+    } else if (format == 'Manhua') {
+      path = page == 1
+          ? '/manga/popular?tipe=manhua'
+          : '/manga/popular/$page?tipe=manhua';
+    } else if (format == 'Manga') {
+      path = page == 1
+          ? '/manga/popular?tipe=manga'
+          : '/manga/popular/$page?tipe=manga';
+    } else {
+      path = page == 1 ? '/manga/popular' : '/manga/popular/$page';
+    }
+    final response = await _dio.get(path);
     final data = _extractList(response.data, 'manga_list');
     return data.map((json) => Comic.fromListJson(json)).toList();
   }
 
   /// Ambil daftar manhwa (komik Korea)
   Future<List<Comic>> getManhwa({int page = 1}) async {
-    final response = await _dio.get(page == 1 ? '/manhwa' : '/manhwa/page/$page');
-    final data = _extractList(response.data, 'manga_list');
-    return data.map((json) => Comic.fromListJson(json)).toList();
+    return getLatestManga(page: page, format: 'Manhwa');
   }
 
   /// Ambil daftar manhua (komik China)
   Future<List<Comic>> getManhua({int page = 1}) async {
-    final response = await _dio.get(page == 1 ? '/manhua' : '/manhua/page/$page');
-    final data = _extractList(response.data, 'manga_list');
-    return data.map((json) => Comic.fromListJson(json)).toList();
+    return getLatestManga(page: page, format: 'Manhua');
+  }
+
+  /// Ambil daftar manga (komik Jepang)
+  Future<List<Comic>> getManga({int page = 1}) async {
+    return getLatestManga(page: page, format: 'Manga');
   }
 
   /// Ambil daftar manga yang direkomendasikan
@@ -95,30 +124,59 @@ class MangaApiService {
   /// [endpoint] adalah slug/endpoint komik, mis: "solo-leveling"
   Future<Map<String, dynamic>> getComicDetail(String endpoint) async {
     final response = await _dio.get('/manga/detail/$endpoint');
-    final data = response.data is Map ? Map<String, dynamic>.from(response.data as Map) : <String, dynamic>{};
+    final data = response.data is Map
+        ? Map<String, dynamic>.from(response.data as Map)
+        : <String, dynamic>{};
 
     // Parse comic dari Edge Function (format langsung, bukan nested)
     final comic = Comic.fromDetailJson(data);
 
     // Chapters dari Edge Function ada di field 'chapter'
-    final chapterRaw = data['chapter'] as List? ?? data['chapter_list'] as List? ?? data['chapters'] as List? ?? [];
+    final chapterRaw =
+        data['chapter'] as List? ??
+        data['chapter_list'] as List? ??
+        data['chapters'] as List? ??
+        [];
     final chapters = chapterRaw.asMap().entries.map((entry) {
       final idx = entry.key;
       final json = Map<String, dynamic>.from(entry.value as Map);
       // Edge Function format: { chapter_title, chapter_endpoint }
-      final chapterEndpoint = json['chapter_endpoint']?.toString() ?? json['endpoint']?.toString() ?? json['id']?.toString() ?? '';
-      final chapterTitle = json['chapter_title']?.toString() ?? json['title']?.toString() ?? 'Chapter ${chapterRaw.length - idx}';
+      final chapterEndpoint =
+          json['chapter_endpoint']?.toString() ??
+          json['endpoint']?.toString() ??
+          json['id']?.toString() ??
+          '';
+      final chapterTitle =
+          json['chapter_title']?.toString() ??
+          json['title']?.toString() ??
+          'Chapter ${chapterRaw.length - idx}';
       return Chapter(
         id: chapterEndpoint,
         comicId: endpoint,
         chapterNumber: _parseChapterNumber(json, idx, chapterRaw.length),
         title: chapterTitle,
         pageCount: 0,
-        releasedAt: _parseDate(json['released_at'] ?? json['date']),
+        releasedAt: Chapter.parseDate(json['released_at'] ?? json['date']),
       );
     }).toList();
 
     return {'comic': comic, 'chapters': chapters};
+  }
+
+  /// Ambil URL cover poster dari halaman detail tanpa mem-parsing chapter.
+  Future<String?> getComicCover(String endpoint) async {
+    try {
+      final response = await _dio.get('/manga/detail/$endpoint');
+      final data = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+      final coverUrl =
+          data['thumb']?.toString() ?? data['cover_url']?.toString() ?? '';
+      return coverUrl.isEmpty ? null : coverUrl;
+    } catch (e) {
+      debugPrint('[Manga API] cover lookup failed for $endpoint: $e');
+      return null;
+    }
   }
 
   // ── Chapter Pages ─────────────────────────────────────────
@@ -127,10 +185,16 @@ class MangaApiService {
   /// [endpoint] adalah slug/endpoint chapter, mis: "solo-leveling-chapter-1"
   Future<List<ComicPage>> getChapterPages(String endpoint) async {
     final response = await _dio.get('/chapter/$endpoint');
-    final data = response.data is Map ? response.data as Map<String, dynamic> : {};
+    final data = response.data is Map
+        ? response.data as Map<String, dynamic>
+        : {};
 
     // Edge Function mengembalikan chapter_image: [{chapter_image_link, image_number}]
-    final rawPages = data['chapter_image'] as List? ?? data['chapter_pages'] as List? ?? data['pages'] as List? ?? [];
+    final rawPages =
+        data['chapter_image'] as List? ??
+        data['chapter_pages'] as List? ??
+        data['pages'] as List? ??
+        [];
     return rawPages.asMap().entries.map((entry) {
       final idx = entry.key;
       final json = entry.value;
@@ -144,9 +208,11 @@ class MangaApiService {
       }
       final map = json as Map<String, dynamic>;
       // Edge Function format: chapter_image_link
-      final imageUrl = map['chapter_image_link']?.toString() ??
+      final imageUrl =
+          map['chapter_image_link']?.toString() ??
           map['image']?.toString() ??
-          map['image_url']?.toString() ?? '';
+          map['image_url']?.toString() ??
+          '';
       return ComicPage(
         id: map['id']?.toString() ?? '${endpoint}_$idx',
         chapterId: endpoint,
@@ -161,7 +227,10 @@ class MangaApiService {
   /// Cari komik berdasarkan keyword
   Future<List<Comic>> search(String query) async {
     if (query.trim().isEmpty) return [];
-    final response = await _dio.get('/search', queryParameters: {'q': query.trim()});
+    final response = await _dio.get(
+      '/search',
+      queryParameters: {'q': query.trim()},
+    );
     final data = _extractList(response.data, 'manga_list');
     return data.map((json) => Comic.fromListJson(json)).toList();
   }
@@ -172,7 +241,9 @@ class MangaApiService {
   Future<List<String>> getGenres() async {
     final response = await _dio.get('/genres');
     final data = _extractList(response.data, 'genre_list');
-    return data.map((g) => (g['genre_name'] ?? g.toString()) as String).toList();
+    return data
+        .map((g) => (g['genre_name'] ?? g.toString()) as String)
+        .toList();
   }
 
   /// Ambil komik berdasarkan genre
@@ -207,7 +278,10 @@ class MangaApiService {
     }
     // fallback: dari title
     final title = json['title']?.toString() ?? '';
-    final match = RegExp(r'(?:chapter|ch)[.\s-]*(\d+)', caseSensitive: false).firstMatch(title);
+    final match = RegExp(
+      r'(?:chapter|ch)[.\s-]*(\d+)',
+      caseSensitive: false,
+    ).firstMatch(title);
     if (match != null) return int.tryParse(match.group(1)!) ?? (total - idx);
     return total - idx;
   }
@@ -231,16 +305,18 @@ class SupabaseComicService {
   // ── Comics List ───────────────────────────────────────────
 
   /// Ambil daftar manga terbaru
-  Future<List<Comic>> getLatestManga({int page = 1}) async {
+  Future<List<Comic>> getLatestManga({int page = 1, String? format}) async {
     try {
-      final response = await _supabase
-          .from('comics')
-          .select()
+      var query = _supabase.from('comics').select();
+      if (format != null) query = query.eq('format', format);
+      final response = await query
           .order('updated_at', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
       debugPrint('[Supabase] getLatestManga: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getLatestManga: $e\n$st');
       return [];
@@ -258,11 +334,123 @@ class SupabaseComicService {
           .range((page - 1) * 20, page * 20 - 1);
 
       debugPrint('[Supabase] getPopularManga: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getPopularManga: $e\n$st');
       return [];
     }
+  }
+
+  /// Merge katalog API dengan komik yang dikelola admin di Supabase.
+  /// Row Supabase menang jika ID yang sama ada di kedua sumber.
+  Future<List<Comic>> mergeAdminComics(
+    List<Comic> apiComics, {
+    String? format,
+    bool popularOnly = false,
+    String? searchQuery,
+    List<String> genres = const [],
+  }) async {
+    try {
+      var query = _supabase.from('comics').select();
+      if (format != null) query = query.eq('format', format);
+      if (popularOnly) query = query.eq('is_popular', true);
+      if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+        query = query.ilike('title', '%${searchQuery.trim()}%');
+      }
+      for (final genre in genres) {
+        query = query.contains('genres', [genre]);
+      }
+      final rows = await query.order('updated_at', ascending: false).limit(20);
+      final managed = (rows as List)
+          .map((row) => Comic.fromSupabase(row as Map<String, dynamic>))
+          .toList();
+      final managedIds = managed.map((comic) => comic.id).toSet();
+      final hiddenIds = await getHiddenComicIds();
+      return [
+        ...managed.where((comic) => !hiddenIds.contains(comic.id)),
+        ...apiComics.where(
+          (comic) =>
+              !managedIds.contains(comic.id) && !hiddenIds.contains(comic.id),
+        ),
+      ];
+    } catch (e) {
+      debugPrint('[Supabase] merge admin comics failed: $e');
+      return apiComics;
+    }
+  }
+
+  Future<List<Comic>> getAdminManagedComics() async {
+    final rows = await _supabase
+        .from('comics')
+        .select()
+        .order('updated_at', ascending: false);
+    return (rows as List)
+        .map((row) => Comic.fromSupabase(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Set<String>> getHiddenComicIds() async {
+    final rows = await _supabase.from('hidden_comics').select('comic_id');
+    return (rows as List)
+        .map((row) => (row as Map<String, dynamic>)['comic_id'].toString())
+        .toSet();
+  }
+
+  Future<List<Comic>> filterHiddenComics(List<Comic> comics) async {
+    final hiddenIds = await getHiddenComicIds();
+    return comics.where((comic) => !hiddenIds.contains(comic.id)).toList();
+  }
+
+  Future<Set<String>> getHiddenChapterIds() async {
+    final rows = await _supabase.from('hidden_chapters').select('chapter_id');
+    return (rows as List)
+        .map((row) => (row as Map<String, dynamic>)['chapter_id'].toString())
+        .toSet();
+  }
+
+  Future<Map<String, dynamic>> filterHiddenChapters(
+    Map<String, dynamic> detail,
+  ) async {
+    final hiddenIds = await getHiddenChapterIds();
+    final chapters = (detail['chapters'] as List? ?? const <Chapter>[])
+        .whereType<Chapter>()
+        .where((chapter) => !hiddenIds.contains(chapter.id))
+        .toList();
+    return {...detail, 'chapters': chapters};
+  }
+
+  Future<void> saveAdminComic(Map<String, dynamic> comic) async {
+    await _supabase.from('comics').upsert({
+      ...comic,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<void> hideAdminComic(String id) async {
+    await _supabase.from('hidden_comics').insert({'comic_id': id});
+  }
+
+  Future<List<Chapter>> getAdminComicChapters(String comicId) async {
+    final rows = await _supabase
+        .from('chapters')
+        .select()
+        .eq('comic_id', comicId)
+        .order('chapter_number', ascending: false);
+    return (rows as List)
+        .map((row) => Chapter.fromSupabase(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> hideAdminChapter({
+    required String comicId,
+    required String chapterId,
+  }) async {
+    await _supabase.from('hidden_chapters').insert({
+      'chapter_id': chapterId,
+      'comic_id': comicId,
+    });
   }
 
   /// Ambil daftar manhwa (komik Korea)
@@ -276,7 +464,9 @@ class SupabaseComicService {
           .range((page - 1) * 20, page * 20 - 1);
 
       debugPrint('[Supabase] getManhwa: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getManhwa: $e\n$st');
       return [];
@@ -294,7 +484,9 @@ class SupabaseComicService {
           .range((page - 1) * 20, page * 20 - 1);
 
       debugPrint('[Supabase] getManga: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getManga: $e\n$st');
       return [];
@@ -312,13 +504,14 @@ class SupabaseComicService {
           .range((page - 1) * 20, page * 20 - 1);
 
       debugPrint('[Supabase] getManhua: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getManhua: $e\n$st');
       return [];
     }
   }
-
 
   /// Ambil daftar manga yang direkomendasikan
   Future<List<Comic>> getRecommended() async {
@@ -331,7 +524,9 @@ class SupabaseComicService {
           .limit(10);
 
       debugPrint('[Supabase] getRecommended: ${response.length} komik');
-      return (response as List).map((json) => Comic.fromSupabase(json)).toList();
+      return (response as List)
+          .map((json) => Comic.fromSupabase(json))
+          .toList();
     } catch (e, st) {
       debugPrint('[Supabase ERROR] getRecommended: $e\n$st');
       return [];
@@ -347,7 +542,7 @@ class SupabaseComicService {
         .select()
         .eq('id', endpoint)
         .single();
-    
+
     final comic = Comic.fromSupabase(comicResponse);
 
     final chaptersResponse = await _supabase
@@ -355,7 +550,7 @@ class SupabaseComicService {
         .select()
         .eq('comic_id', endpoint)
         .order('chapter_number', ascending: false);
-        
+
     final chapters = (chaptersResponse as List)
         .map((json) => Chapter.fromSupabase(json))
         .toList();
@@ -372,7 +567,7 @@ class SupabaseComicService {
         .select()
         .eq('chapter_id', endpoint)
         .order('page_number', ascending: true);
-        
+
     return (response as List)
         .map((json) => ComicPage.fromSupabase(json))
         .toList();
@@ -383,14 +578,14 @@ class SupabaseComicService {
   /// Cari komik berdasarkan keyword
   Future<List<Comic>> search(String query) async {
     if (query.trim().isEmpty) return [];
-    
+
     final response = await _supabase
         .from('comics')
         .select()
         .ilike('title', '%${query.trim()}%')
         .order('updated_at', ascending: false)
         .limit(20);
-        
+
     return (response as List).map((json) => Comic.fromSupabase(json)).toList();
   }
 
@@ -399,7 +594,14 @@ class SupabaseComicService {
   /// Ambil daftar semua genre
   Future<List<String>> getGenres() async {
     // Sebagai mock, kita kembalikan beberapa genre populer
-    return ['Action', 'Adventure', 'Fantasy', 'Comedy', 'Sci-Fi', 'Martial Arts'];
+    return [
+      'Action',
+      'Adventure',
+      'Fantasy',
+      'Comedy',
+      'Sci-Fi',
+      'Martial Arts',
+    ];
   }
 
   /// Ambil komik berdasarkan genre
@@ -411,8 +613,7 @@ class SupabaseComicService {
         .contains('genres', [genreEndpoint])
         .order('updated_at', ascending: false)
         .range((page - 1) * 20, page * 20 - 1);
-        
+
     return (response as List).map((json) => Comic.fromSupabase(json)).toList();
   }
 }
-

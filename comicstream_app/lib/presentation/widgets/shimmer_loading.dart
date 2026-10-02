@@ -78,30 +78,24 @@ class ComicCardShimmer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Expanded(
-            child: ShimmerLoading(borderRadius: 12),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                ShimmerLoading(height: 12, width: 100),
-                SizedBox(height: 6),
-                ShimmerLoading(height: 10, width: 60),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        AspectRatio(
+          aspectRatio: 3 / 4,
+          child: ShimmerLoading(borderRadius: 12),
+        ),
+        SizedBox(height: 8),
+        ShimmerLoading(height: 12, width: 110),
+        SizedBox(height: 5),
+        ShimmerLoading(height: 12, width: 72),
+        SizedBox(height: 8),
+        ShimmerLoading(height: 8, width: 65),
+        SizedBox(height: 7),
+        ShimmerLoading(height: 7),
+        SizedBox(height: 5),
+        ShimmerLoading(height: 7),
+      ],
     );
   }
 }
@@ -118,11 +112,11 @@ class ComicGridShimmer extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 200,
-        childAspectRatio: 0.62,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.42,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 24,
       ),
       itemCount: count,
       itemBuilder: (context, index) => const ComicCardShimmer(),

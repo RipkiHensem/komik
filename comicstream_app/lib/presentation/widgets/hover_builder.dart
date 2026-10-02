@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
 
 /// A sleek, performant hover effect wrapper for Web & Desktop.
-/// Adds cursor pointer, subtle scale transition, and optional glow/shadow.
+/// Adds a restrained press/hover transition for desktop and mobile widgets.
 class HoverWidget extends StatefulWidget {
   final Widget child;
   final Widget Function(BuildContext context, bool isHovered, Widget? child)? builder;
@@ -64,28 +63,6 @@ class _HoverWidgetState extends State<HoverWidget> {
       content = widget.builder!(context, _isActive, widget.child);
     } else {
       content = widget.child;
-    }
-
-    if (widget.enableGlow) {
-      final glow = widget.glowColor ?? AppColors.primary;
-      content = AnimatedContainer(
-        duration: _isPressed ? const Duration(milliseconds: 100) : widget.duration,
-        curve: widget.curve,
-        decoration: BoxDecoration(
-          borderRadius: widget.borderRadius ?? BorderRadius.circular(14),
-          boxShadow: _isActive
-              ? [
-                  BoxShadow(
-                    color: glow.withValues(alpha: 0.35),
-                    blurRadius: 14,
-                    spreadRadius: 1,
-                    offset: const Offset(0, 3),
-                  ),
-                ]
-              : null,
-        ),
-        child: content,
-      );
     }
 
     if (widget.enableScale) {

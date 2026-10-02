@@ -10,8 +10,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
 import '../../../data/models/comic_page.dart';
 import '../../../data/models/chapter.dart';
+import '../../../data/models/comment.dart';
 import '../../widgets/error_view.dart';
-import '../../widgets/hover_builder.dart';
 
 /// Chapter reader screen with responsive desktop phone-width canvas,
 /// continuous vertical slide (up/down) webtoon mode, and horizontal manga mode.
@@ -34,7 +34,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Timer? _hideOverlayTimer;
   String _readingMode = AppConstants.readingModeScroll; // Default vertical scroll for webtoons
   int _currentPage = 0;
-  late final ValueNotifier<int> _currentPageNotifier = ValueNotifier<int>(0);
   final PageController _pageController = PageController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
@@ -60,7 +59,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   @override
   void dispose() {
     _hideOverlayTimer?.cancel();
-    _currentPageNotifier.dispose();
     _pageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -84,25 +82,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     } else {
       _hideOverlayTimer?.cancel();
     }
-  }
-
-  void _setReadingMode(String mode) {
-    if (_readingMode == mode) return;
-    _startHideOverlayTimer();
-    setState(() => _readingMode = mode);
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          mode == AppConstants.readingModeScroll
-              ? 'Mode Baca: Slide Bawah - Atas (Webtoon)'
-              : 'Mode Baca: Geser Samping (Manga)',
-        ),
-        duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.surface,
-      ),
-    );
   }
 
   void _saveProgress(int pageNumber) {
@@ -216,11 +195,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final readerWidth = isDesktop ? 560.0 : screenSize.width;
 
     // Calculate next & previous chapters
+    Chapter? currentChapter;
     Chapter? prevChapter;
     Chapter? nextChapter;
     chaptersAsync.whenData((chapters) {
       final currentIndex = chapters.indexWhere((ch) => ch.id == widget.chapterId);
       if (currentIndex != -1) {
+        currentChapter = chapters[currentIndex];
         if (currentIndex > 0) {
           nextChapter = chapters[currentIndex - 1];
         }
@@ -229,6 +210,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         }
       }
     });
+    final chapterLabel = currentChapter == null
+        ? 'Chapter'
+        : 'Chapter ${currentChapter!.chapterNumber}';
 
     return PopScope(
       canPop: false,
@@ -297,7 +281,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 ),
               );
 
-              // Position scrollbar at the far right of the desktop
+              // Keep the reader scrollable without showing a scrollbar.
               Widget scrollableContent;
               if (_readingMode == AppConstants.readingModeScroll) {
                 scrollableContent = ScrollConfiguration(
@@ -326,74 +310,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
               return Stack(
                 children: [
-                  // ── Reader Content (Full screen with far-right scrollbar on desktop) ──
+                  // ── Full-screen reader content ──
                   Positioned.fill(
                     child: scrollableContent,
                   ),
 
-                  // ── Custom Non-Blinking Scrollbar (Draggable & Proportional) ──
-                  if (_readingMode == AppConstants.readingModeScroll && pages.length > 1)
-                    Positioned(
-                      top: 0,
-                      bottom: 0,
-                      right: 2,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onVerticalDragUpdate: (details) {
-                          if (!_scrollController.hasClients ||
-                              _scrollController.position.maxScrollExtent <= 0) {
-                            return;
-                          }
-                          final screenHeight = MediaQuery.of(context).size.height;
-                          final fraction = (details.globalPosition.dy / screenHeight).clamp(0.0, 1.0);
-                          final targetOffset = fraction * _scrollController.position.maxScrollExtent;
-                          _scrollController.jumpTo(targetOffset);
-                        },
-                        child: SizedBox(
-                          width: 14,
-                          child: ValueListenableBuilder<int>(
-                            valueListenable: _currentPageNotifier,
-                            builder: (context, currentPage, _) {
-                              final screenHeight = MediaQuery.of(context).size.height;
-                              final thumbHeight = (screenHeight / pages.length).clamp(30.0, screenHeight);
-                              final maxTop = screenHeight - thumbHeight;
-                              final topOffset = (currentPage / (pages.length - 1)) * maxTop;
-
-                              return Stack(
-                                alignment: Alignment.centerRight,
-                                children: [
-                                  // Track
-                                  Container(
-                                    width: 5,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.05),
-                                      borderRadius: BorderRadius.circular(3),
-                                    ),
-                                  ),
-                                  // Thumb
-                                  AnimatedPositioned(
-                                    duration: const Duration(milliseconds: 150),
-                                    curve: Curves.easeOut,
-                                    top: topOffset,
-                                    right: 0,
-                                    child: Container(
-                                      width: 5,
-                                      height: thumbHeight,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.primary.withValues(alpha: 0.7),
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  // ── Top Overlay (Auto-hides in 5 seconds) ──────────────────
+                  // Minimal reader header: back and current chapter.
                   Positioned(
                     top: 0,
                     left: 0,
@@ -401,17 +323,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     child: IgnorePointer(
                       ignoring: !_showOverlay,
                       child: AnimatedOpacity(
-                        opacity: _showOverlay ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
+                        opacity: _showOverlay ? 1 : 0,
+                        duration: const Duration(milliseconds: 250),
                         child: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withValues(alpha: 0.95),
-                                Colors.black.withValues(alpha: 0.5),
+                                Colors.black.withValues(alpha: 0.75),
                                 Colors.transparent,
                               ],
                             ),
@@ -419,115 +339,56 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           child: SafeArea(
                             bottom: false,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                               child: Row(
                                 children: [
-                                  // Back button
-                                  HoverWidget(
-                                    scale: 1.08,
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        onTap: _handleExit,
-                                        borderRadius: BorderRadius.circular(24),
-                                        child: Container(
-                                          width: 42,
-                                          height: 42,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.surface.withValues(alpha: 0.9),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.white.withValues(alpha: 0.2),
-                                              width: 1,
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.arrow_back_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
+                                  IconButton(
+                                    onPressed: _handleExit,
+                                    tooltip: 'Kembali',
+                                    style: IconButton.styleFrom(
+                                      minimumSize: const Size(44, 44),
+                                      backgroundColor: Colors.black.withValues(alpha: 0.35),
+                                      foregroundColor: Colors.white,
                                     ),
+                                    icon: const Icon(Icons.arrow_back_rounded),
                                   ),
                                   const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text(
-                                          'ComicStream Reader',
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        ValueListenableBuilder<int>(
-                                          valueListenable: _currentPageNotifier,
-                                          builder: (context, currentPage, _) {
-                                            return Text(
-                                              'Halaman ${currentPage + 1} / ${pages.length}',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.white.withValues(alpha: 0.7),
-                                              ),
-                                            );
-                                          },
-                                        ),
+                                  Text(
+                                    chapterLabel,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      shadows: [
+                                        Shadow(color: Colors.black54, blurRadius: 8),
                                       ],
                                     ),
                                   ),
-                                  // Reading mode toggle
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: AppColors.surface.withValues(alpha: 0.9),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: Colors.white.withValues(alpha: 0.15),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Tooltip(
-                                          message: 'Mode Slide Bawah-Atas (Webtoon)',
-                                          child: _modeButton(
-                                            icon: Icons.swap_vert_rounded,
-                                            label: isDesktop ? 'Slide Bawah-Atas' : null,
-                                            isActive: _readingMode ==
-                                                AppConstants.readingModeScroll,
-                                            onTap: () => _setReadingMode(
-                                                AppConstants.readingModeScroll),
-                                          ),
+                                  const Spacer(),
+                                  IconButton(
+                                    onPressed: () {
+                                      _hideOverlayTimer?.cancel();
+                                      showModalBottomSheet<void>(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        useSafeArea: true,
+                                        backgroundColor: AppColors.background,
+                                        builder: (_) => ChapterCommentsSheet(
+                                          chapterId: widget.chapterId,
                                         ),
-                                        Tooltip(
-                                          message: 'Mode Geser Samping (Manga)',
-                                          child: _modeButton(
-                                            icon: Icons.swap_horiz_rounded,
-                                            label: isDesktop ? 'Geser Samping' : null,
-                                            isActive: _readingMode ==
-                                                AppConstants.readingModePage,
-                                            onTap: () => _setReadingMode(
-                                                AppConstants.readingModePage),
-                                          ),
-                                        ),
-                                      ],
+                                      ).whenComplete(() {
+                                        if (mounted && _showOverlay) {
+                                          _startHideOverlayTimer();
+                                        }
+                                      });
+                                    },
+                                    tooltip: 'Komentar chapter',
+                                    style: IconButton.styleFrom(
+                                      minimumSize: const Size(44, 44),
+                                      backgroundColor: Colors.black.withValues(alpha: 0.35),
+                                      foregroundColor: Colors.white,
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  HoverWidget(
-                                    scale: 1.1,
-                                    child: IconButton(
-                                      icon: const Icon(Icons.close_rounded, color: Colors.white),
-                                      tooltip: 'Tutup Reader',
-                                      onPressed: _handleExit,
-                                    ),
+                                    icon: const Icon(Icons.chat_bubble_outline_rounded),
                                   ),
                                 ],
                               ),
@@ -538,7 +399,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     ),
                   ),
 
-                  // ── Bottom Overlay (Auto-hides in 5 seconds: Prev, Keluar, Next) ──
+                  // Only chapter-to-chapter navigation remains at the bottom.
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -546,17 +407,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     child: IgnorePointer(
                       ignoring: !_showOverlay,
                       child: AnimatedOpacity(
-                        opacity: _showOverlay ? 1.0 : 0.0,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
+                        opacity: _showOverlay ? 1 : 0,
+                        duration: const Duration(milliseconds: 250),
                         child: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.bottomCenter,
                               end: Alignment.topCenter,
                               colors: [
-                                Colors.black.withValues(alpha: 0.95),
-                                Colors.black.withValues(alpha: 0.5),
+                                Colors.black.withValues(alpha: 0.78),
                                 Colors.transparent,
                               ],
                             ),
@@ -564,134 +423,44 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           child: SafeArea(
                             top: false,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                              padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+                              child: Row(
                                 children: [
-                                  // Page jump slider
-                                  if (pages.length > 1)
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                                      child: SliderTheme(
-                                        data: SliderThemeData(
-                                          activeTrackColor: AppColors.primary,
-                                          inactiveTrackColor:
-                                              Colors.white.withValues(alpha: 0.2),
-                                          thumbColor: AppColors.primary,
-                                          thumbShape: const RoundSliderThumbShape(
-                                            enabledThumbRadius: 6,
-                                          ),
-                                          trackHeight: 3,
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: prevChapter == null
+                                          ? null
+                                          : () => _goToChapter(prevChapter!.id),
+                                      icon: const Icon(Icons.chevron_left_rounded),
+                                      label: const Text('Sebelumnya'),
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(46),
+                                        foregroundColor: Colors.white,
+                                        disabledForegroundColor: Colors.white38,
+                                        side: BorderSide(
+                                          color: Colors.white.withValues(alpha: 0.22),
                                         ),
-                                        child: ValueListenableBuilder<int>(
-                                          valueListenable: _currentPageNotifier,
-                                          builder: (context, currentPage, _) {
-                                            return Slider(
-                                              value: currentPage
-                                                  .clamp(0, pages.length - 1)
-                                                  .toDouble(),
-                                              min: 0,
-                                              max: (pages.length - 1).toDouble(),
-                                              onChanged: (value) {
-                                                _startHideOverlayTimer();
-                                                final targetPage = value.toInt();
-                                                _currentPage = targetPage;
-                                                _currentPageNotifier.value = targetPage;
-                                                if (_readingMode ==
-                                                    AppConstants.readingModePage) {
-                                                  _pageController.jumpToPage(targetPage);
-                                                } else if (_scrollController.hasClients &&
-                                                    _scrollController
-                                                            .position.maxScrollExtent >
-                                                        0) {
-                                                  final targetOffset = (targetPage /
-                                                          (pages.length - 1)) *
-                                                      _scrollController
-                                                          .position.maxScrollExtent;
-                                                  _scrollController.jumpTo(targetOffset);
-                                                }
-                                              },
-                                            );
-                                          },
-                                        ),
+                                        backgroundColor: Colors.black.withValues(alpha: 0.28),
                                       ),
                                     ),
-
-                                  // Chapter navigation: Prev, Keluar, Next
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        HoverWidget(
-                                          scale: 1.08,
-                                          child: TextButton.icon(
-                                            onPressed: prevChapter != null
-                                                ? () => _goToChapter(prevChapter!.id)
-                                                : null,
-                                            icon: Icon(
-                                              Icons.skip_previous_rounded,
-                                              size: 20,
-                                              color: prevChapter != null
-                                                  ? Colors.white
-                                                  : Colors.white24,
-                                            ),
-                                            label: Text(
-                                              'Prev',
-                                              style: TextStyle(
-                                                color: prevChapter != null
-                                                    ? Colors.white
-                                                    : Colors.white24,
-                                              ),
-                                            ),
-                                          ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: nextChapter == null
+                                          ? null
+                                          : () => _goToChapter(nextChapter!.id),
+                                      icon: const Icon(Icons.chevron_right_rounded),
+                                      label: const Text('Berikutnya'),
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size.fromHeight(46),
+                                        foregroundColor: Colors.white,
+                                        disabledForegroundColor: Colors.white38,
+                                        side: BorderSide(
+                                          color: Colors.white.withValues(alpha: 0.22),
                                         ),
-                                        // Middle: Keluar button
-                                        HoverWidget(
-                                          scale: 1.06,
-                                          child: ElevatedButton.icon(
-                                            onPressed: _handleExit,
-                                            icon: const Icon(Icons.arrow_back_rounded, size: 16),
-                                            label: const Text('Keluar'),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: AppColors.surface,
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 16,
-                                                vertical: 8,
-                                              ),
-                                              side: BorderSide(
-                                                color: Colors.white.withValues(alpha: 0.2),
-                                                width: 0.5,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        HoverWidget(
-                                          scale: 1.08,
-                                          child: TextButton.icon(
-                                            onPressed: nextChapter != null
-                                                ? () => _goToChapter(nextChapter!.id)
-                                                : null,
-                                            icon: Text(
-                                              'Next',
-                                              style: TextStyle(
-                                                color: nextChapter != null
-                                                    ? Colors.white
-                                                    : Colors.white24,
-                                              ),
-                                            ),
-                                            label: Icon(
-                                              Icons.skip_next_rounded,
-                                              size: 20,
-                                              color: nextChapter != null
-                                                  ? Colors.white
-                                                  : Colors.white24,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                        backgroundColor: Colors.black.withValues(alpha: 0.28),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -705,7 +474,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 ],
               );
             },
-            loading: () => const Center(
+            loading: () => Center(
               child: CircularProgressIndicator(color: AppColors.primary),
             ),
             error: (err, stack) => Center(
@@ -728,7 +497,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       itemCount: pages.length,
       onPageChanged: (index) {
         _currentPage = index;
-        _currentPageNotifier.value = index;
         _saveProgress(index + 1);
       },
       itemBuilder: (context, index) {
@@ -762,9 +530,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               ? (_scrollController.offset / maxExt).clamp(0.0, 1.0)
               : 0.0;
           final estimatedPage = (scrollFraction * (pages.length - 1)).round();
-          if (estimatedPage != _currentPageNotifier.value) {
+          if (estimatedPage != _currentPage) {
             _currentPage = estimatedPage;
-            _currentPageNotifier.value = estimatedPage;
             _saveProgress(estimatedPage + 1);
           }
         }
@@ -790,17 +557,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           padding: EdgeInsets.zero,
           itemCount: pages.length,
           itemBuilder: (context, index) {
-            return ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: readerWidth,
-                maxWidth: readerWidth,
-                minHeight: readerWidth * 1.3,
-              ),
-              child: ProxiedImage(
-                imageUrl: pages[index].imageUrl,
-                fit: BoxFit.fitWidth,
-                width: readerWidth,
-              ),
+            return ProxiedImage(
+              imageUrl: pages[index].imageUrl,
+              fit: BoxFit.fitWidth,
+              width: readerWidth,
             );
           },
         ),
@@ -808,43 +568,211 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  Widget _modeButton({
-    required IconData icon,
-    String? label,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
-    return HoverWidget(
-      scale: 1.06,
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive ? AppColors.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: isActive ? Colors.white : AppColors.textMuted,
+}
+
+class ChapterCommentsSheet extends ConsumerStatefulWidget {
+  final String chapterId;
+
+  const ChapterCommentsSheet({super.key, required this.chapterId});
+
+  @override
+  ConsumerState<ChapterCommentsSheet> createState() => _ChapterCommentsSheetState();
+}
+
+class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
+  final TextEditingController _commentController = TextEditingController();
+  final FocusNode _commentFocus = FocusNode();
+  bool _isSending = false;
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    _commentFocus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+    final user = authState.user;
+    final isLoggedIn = user != null;
+    final commentsAsync = ref.watch(chapterCommentsProvider(widget.chapterId));
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75 + keyboardHeight,
+      padding: EdgeInsets.only(bottom: keyboardHeight),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.divider)),
             ),
-            if (label != null) ...[
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isActive ? Colors.white : AppColors.textMuted,
+            child: Row(
+              children: [
+                Icon(Icons.chat_bubble_outline_rounded, color: AppColors.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Komentar Chapter',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                 ),
-              ),
-            ],
-          ],
-        ),
+                const Spacer(),
+                IconButton(
+                  icon: Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+
+          // Comments List
+          Expanded(
+            child: commentsAsync.when(
+              data: (comments) {
+                if (comments.isEmpty) {
+                  return Center(
+                    child: Text('Belum ada komentar.', style: TextStyle(color: AppColors.textMuted)),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: comments.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final comment = comments[index];
+                    final isOwn = isLoggedIn && comment.userId == user.id;
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: AppColors.primarySurface,
+                          backgroundImage: (comment.avatarUrl != null && comment.avatarUrl!.isNotEmpty)
+                              ? NetworkImage(comment.avatarUrl!)
+                              : null,
+                          child: (comment.avatarUrl == null || comment.avatarUrl!.isEmpty)
+                              ? Text(
+                                  (comment.username.isNotEmpty ? comment.username[0] : '?').toUpperCase(),
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary),
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.glassBorder),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      comment.username,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: isOwn ? AppColors.primary : AppColors.textPrimary,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    if (isOwn)
+                                      GestureDetector(
+                                        onTap: () {
+                                          ref.read(chapterCommentsProvider(widget.chapterId).notifier).deleteComment(comment.id);
+                                        },
+                                        child: Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.textMuted),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  comment.content,
+                                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+              loading: () => Center(child: CircularProgressIndicator(color: AppColors.primary)),
+              error: (err, stack) => const Center(child: Text('Gagal memuat komentar', style: TextStyle(color: Colors.red))),
+            ),
+          ),
+
+          // Input Box
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border(top: BorderSide(color: AppColors.divider)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _commentController,
+                    focusNode: _commentFocus,
+                    enabled: isLoggedIn,
+                    maxLines: 3,
+                    minLines: 1,
+                    onChanged: (_) => setState(() {}),
+                    style: TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: isLoggedIn ? 'Tulis komentar...' : 'Masuk untuk komentar',
+                      hintStyle: TextStyle(color: AppColors.textMuted),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: AppColors.glassBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: AppColors.glassBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: AppColors.primary),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                IconButton(
+                  onPressed: (isLoggedIn && _commentController.text.trim().isNotEmpty && !_isSending)
+                      ? () async {
+                          setState(() => _isSending = true);
+                          await ref.read(chapterCommentsProvider(widget.chapterId).notifier).postComment(
+                            userId: user.id,
+                            username: user.username,
+                            avatarUrl: user.avatarUrl,
+                            content: _commentController.text,
+                          );
+                          _commentController.clear();
+                          setState(() => _isSending = false);
+                        }
+                      : null,
+                  icon: _isSending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Icon(
+                          Icons.send_rounded,
+                          color: (isLoggedIn && _commentController.text.trim().isNotEmpty) ? AppColors.primary : AppColors.textMuted,
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

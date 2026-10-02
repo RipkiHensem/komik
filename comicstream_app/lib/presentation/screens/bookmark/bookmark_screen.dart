@@ -367,7 +367,7 @@ class _HistoryTab extends ConsumerWidget {
                       Container(
                         width: 6,
                         height: 6,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: AppColors.primary,
                         ),
@@ -443,7 +443,7 @@ class _HistoryTab extends ConsumerWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.delete_sweep_rounded,
                               size: 15,
                               color: AppColors.error,
@@ -554,7 +554,7 @@ class _BookmarkCardState extends State<_BookmarkCard> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
         ),
-        child: const Row(
+        child: Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             Text(
@@ -847,9 +847,9 @@ Widget _buildEmptyState(
               label: Text(buttonLabel),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 4,
-                shadowColor: AppColors.primary.withValues(alpha: 0.4),
+                foregroundColor: AppColors.background,
+                elevation: 0,
+                shadowColor: Colors.transparent,
                 padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
