@@ -1,4 +1,8 @@
-# ComicStream 
+# Yomu (sebelumnya ComicStream)
+
+Checkpoint P6/P7: integrasi API melalui repository, unit test, dan MVP dengan
+autentikasi, kamera avatar, serta notifikasi lokal Android.
+Lihat [pemetaan kriteria dan panduan demonstrasi P6/P7](P6_P7_MVP.md).
 
 **Aplikasi Baca Komik / Manhwa Mobile Modern** — Flutter + Supabase
 

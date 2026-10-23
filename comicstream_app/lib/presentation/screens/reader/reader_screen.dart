@@ -8,9 +8,9 @@ import '../../widgets/proxied_image.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
+import '../../../data/models/comic.dart';
 import '../../../data/models/comic_page.dart';
 import '../../../data/models/chapter.dart';
-import '../../../data/models/comment.dart';
 import '../../widgets/error_view.dart';
 
 /// Chapter reader screen with responsive desktop phone-width canvas,
@@ -30,13 +30,21 @@ class ReaderScreen extends ConsumerStatefulWidget {
 }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
+  static const int _maxReaderImageDecodeHeight = 4096;
   bool _showOverlay = true;
   Timer? _hideOverlayTimer;
-  String _readingMode = AppConstants.readingModeScroll; // Default vertical scroll for webtoons
+  Timer? _progressSaveTimer;
+  final String _readingMode = AppConstants.readingModeScroll; // Default vertical scroll for webtoons
   int _currentPage = 0;
   final PageController _pageController = PageController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
+  String? _comicTitle;
+  String? _comicCoverUrl;
+  bool _isLoadingComicMetadata = false;
+  int? _lastPersistedPage;
+  bool _metadataWasPersisted = false;
+  bool _chapterMarkedAsRead = false;
 
   @override
   void initState() {
@@ -51,14 +59,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       ),
     );
     _startHideOverlayTimer();
+    _loadComicMetadata();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _saveProgress(1);
+      _scheduleProgressSave(1);
     });
   }
 
   @override
   void dispose() {
     _hideOverlayTimer?.cancel();
+    _progressSaveTimer?.cancel();
     _pageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -84,24 +94,57 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }
   }
 
-  void _saveProgress(int pageNumber) {
-    // 1. Mark chapter as read locally and sync to backend
-    ref
-        .read(readChaptersProvider(widget.comicId).notifier)
-        .markAsRead(widget.chapterId);
+  void _loadComicMetadata() {
+    if (_isLoadingComicMetadata || _comicTitle != null) return;
+    _isLoadingComicMetadata = true;
 
-    // 2. Record reading history immediately
+    ref.read(comicFromDetailProvider(widget.comicId).future).then((Comic comic) {
+      if (!mounted) return;
+      _comicTitle = comic.title;
+      _comicCoverUrl = comic.coverUrl;
+      _scheduleProgressSave(_currentPage + 1);
+    }).catchError((_) {
+      // Riwayat tetap dapat disimpan walau metadata komik sedang tidak tersedia.
+    });
+  }
+
+  /// Menunda sinkronisasi hingga pembaca berhenti menggeser halaman.
+  /// Ini mencegah request Supabase berulang saat scroll masih bergerak.
+  void _scheduleProgressSave(int pageNumber) {
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = Timer(const Duration(milliseconds: 850), () {
+      _persistProgress(pageNumber);
+    });
+  }
+
+  void _flushProgress() {
+    _progressSaveTimer?.cancel();
+    _persistProgress(_currentPage + 1);
+  }
+
+  void _persistProgress(int pageNumber) {
+    final hasMetadata = _comicTitle?.isNotEmpty == true;
+    if (_lastPersistedPage == pageNumber &&
+        (!hasMetadata || _metadataWasPersisted)) {
+      return;
+    }
+
+    _lastPersistedPage = pageNumber;
+    _metadataWasPersisted = hasMetadata;
+
+    if (!_chapterMarkedAsRead) {
+      _chapterMarkedAsRead = true;
+      ref
+          .read(readChaptersProvider(widget.comicId).notifier)
+          .markAsRead(widget.chapterId);
+    }
+
     ref.read(historyProvider.notifier).recordProgress(
           comicId: widget.comicId,
           chapterId: widget.chapterId,
           page: pageNumber,
-        );
-
-    // 3. Update bookmark progress if bookmarked
-    ref.read(bookmarksProvider.notifier).updateProgress(
-          widget.comicId,
-          widget.chapterId,
-          pageNumber,
+          comicTitle: _comicTitle,
+          comicCoverUrl: _comicCoverUrl,
         );
   }
 
@@ -149,7 +192,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   /// Robust exit handler that always returns the user to the comic detail screen
   void _handleExit() {
-    _saveProgress(_currentPage + 1);
+    _flushProgress();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     if (context.canPop()) {
       context.pop();
@@ -161,7 +204,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _goToChapter(String targetChapterId) {
-    _saveProgress(_currentPage + 1);
+    _flushProgress();
     _hideOverlayTimer?.cancel();
     context.pushReplacement('/comic/${widget.comicId}/chapter/$targetChapterId');
   }
@@ -184,8 +227,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Hanya watch pages — chapters dibaca di _ChapterNavBar terpisah
+    // agar rebuild chapters tidak mereset posisi scroll/page reader.
     final pagesAsync = ref.watch(chapterPagesProvider(widget.chapterId));
-    final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
 
     // Responsive desktop calculations:
     // If screen width is wider than 680px, constrain the reader to a mobile phone width (560px)
@@ -194,21 +238,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final isDesktop = screenSize.width > 680;
     final readerWidth = isDesktop ? 560.0 : screenSize.width;
 
-    // Calculate next & previous chapters
+    // Label chapter — baca sekali, tidak watch
+    final chaptersSnapshot = ref.read(comicChaptersProvider(widget.comicId));
     Chapter? currentChapter;
-    Chapter? prevChapter;
-    Chapter? nextChapter;
-    chaptersAsync.whenData((chapters) {
-      final currentIndex = chapters.indexWhere((ch) => ch.id == widget.chapterId);
-      if (currentIndex != -1) {
-        currentChapter = chapters[currentIndex];
-        if (currentIndex > 0) {
-          nextChapter = chapters[currentIndex - 1];
-        }
-        if (currentIndex < chapters.length - 1) {
-          prevChapter = chapters[currentIndex + 1];
-        }
-      }
+    chaptersSnapshot.whenData((chapters) {
+      final idx = chapters.indexWhere((ch) => ch.id == widget.chapterId);
+      if (idx != -1) currentChapter = chapters[idx];
     });
     final chapterLabel = currentChapter == null
         ? 'Chapter'
@@ -409,64 +444,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       child: AnimatedOpacity(
                         opacity: _showOverlay ? 1 : 0,
                         duration: const Duration(milliseconds: 250),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.78),
-                                Colors.transparent,
-                              ],
-                            ),
-                          ),
-                          child: SafeArea(
-                            top: false,
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: prevChapter == null
-                                          ? null
-                                          : () => _goToChapter(prevChapter!.id),
-                                      icon: const Icon(Icons.chevron_left_rounded),
-                                      label: const Text('Sebelumnya'),
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size.fromHeight(46),
-                                        foregroundColor: Colors.white,
-                                        disabledForegroundColor: Colors.white38,
-                                        side: BorderSide(
-                                          color: Colors.white.withValues(alpha: 0.22),
-                                        ),
-                                        backgroundColor: Colors.black.withValues(alpha: 0.28),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: nextChapter == null
-                                          ? null
-                                          : () => _goToChapter(nextChapter!.id),
-                                      icon: const Icon(Icons.chevron_right_rounded),
-                                      label: const Text('Berikutnya'),
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size.fromHeight(46),
-                                        foregroundColor: Colors.white,
-                                        disabledForegroundColor: Colors.white38,
-                                        side: BorderSide(
-                                          color: Colors.white.withValues(alpha: 0.22),
-                                        ),
-                                        backgroundColor: Colors.black.withValues(alpha: 0.28),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+                        child: _ChapterNavBar(
+                          comicId: widget.comicId,
+                          currentChapterId: widget.chapterId,
+                          onNavigate: _goToChapter,
                         ),
                       ),
                     ),
@@ -497,7 +478,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       itemCount: pages.length,
       onPageChanged: (index) {
         _currentPage = index;
-        _saveProgress(index + 1);
+        _scheduleProgressSave(index + 1);
       },
       itemBuilder: (context, index) {
         return InteractiveViewer(
@@ -509,6 +490,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               child: ProxiedImage(
                 imageUrl: pages[index].imageUrl,
                 fit: BoxFit.contain,
+                cacheWidth: (readerWidth * MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+                cacheHeight: _maxReaderImageDecodeHeight,
+                filterQuality: FilterQuality.low,
+                gaplessPlayback: true,
               ),
             ),
           ),
@@ -519,9 +505,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   /// Scroll mode (vertical continuous slide) — for manhwa/webtoon
   Widget _buildScrollMode(List<ComicPage> pages, double readerWidth) {
+    // Hitung cacheExtent sekali di sini agar tidak menyebabkan rebuild
+    // pada setiap frame saat MediaQuery berubah (mis. keyboard muncul).
+    final cacheExtent = MediaQuery.sizeOf(context).height * 1.25;
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        if (notification is ScrollUpdateNotification) {
+        // Menyimpan posisi saat scroll selesai saja. Menjadwalkan timer pada
+        // setiap frame scroll dapat membuat reader terasa tersendat di HP.
+        if (notification is ScrollEndNotification) {
           final maxExt = _scrollController.hasClients &&
                   _scrollController.position.maxScrollExtent > 0
               ? _scrollController.position.maxScrollExtent
@@ -532,7 +523,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           final estimatedPage = (scrollFraction * (pages.length - 1)).round();
           if (estimatedPage != _currentPage) {
             _currentPage = estimatedPage;
-            _saveProgress(estimatedPage + 1);
+            _scheduleProgressSave(estimatedPage + 1);
           }
         }
         return false;
@@ -553,14 +544,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
           ),
-          cacheExtent: 3000,
+          cacheExtent: cacheExtent,
           padding: EdgeInsets.zero,
           itemCount: pages.length,
           itemBuilder: (context, index) {
-            return ProxiedImage(
-              imageUrl: pages[index].imageUrl,
-              fit: BoxFit.fitWidth,
-              width: readerWidth,
+            return RepaintBoundary(
+              child: ProxiedImage(
+                imageUrl: pages[index].imageUrl,
+                fit: BoxFit.fitWidth,
+                width: readerWidth,
+                cacheWidth: (readerWidth * MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+                cacheHeight: _maxReaderImageDecodeHeight,
+                filterQuality: FilterQuality.low,
+                gaplessPlayback: true,
+              ),
             );
           },
         ),
@@ -583,6 +581,9 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocus = FocusNode();
   bool _isSending = false;
+  bool _isSpoiler = false;
+  // Menyimpan id komentar spoiler yang sudah di-reveal oleh user
+  final Set<String> _revealedSpoilers = {};
 
   @override
   void dispose() {
@@ -643,6 +644,7 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                   itemBuilder: (context, index) {
                     final comment = comments[index];
                     final isOwn = isLoggedIn && comment.userId == user.id;
+                    final isSpoilerRevealed = _revealedSpoilers.contains(comment.id);
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -666,7 +668,11 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                             decoration: BoxDecoration(
                               color: AppColors.surface,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.glassBorder),
+                              border: Border.all(
+                                color: comment.isSpoiler
+                                    ? Colors.orange.withValues(alpha: 0.45)
+                                    : AppColors.glassBorder,
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -681,6 +687,21 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                         color: isOwn ? AppColors.primary : AppColors.textPrimary,
                                       ),
                                     ),
+                                    if (comment.isSpoiler) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                                        ),
+                                        child: const Text(
+                                          '⚠ Spoiler',
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.orange),
+                                        ),
+                                      ),
+                                    ],
                                     const Spacer(),
                                     if (isOwn)
                                       GestureDetector(
@@ -692,10 +713,62 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                   ],
                                 ),
                                 const SizedBox(height: 6),
-                                Text(
-                                  comment.content,
-                                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
-                                ),
+                                // ── Spoiler blur overlay ──────────────────────
+                                if (comment.isSpoiler && !isSpoilerRevealed)
+                                  GestureDetector(
+                                    onTap: () => setState(() => _revealedSpoilers.add(comment.id)),
+                                    child: Stack(
+                                      children: [
+                                        // Teks asli tapi blur
+                                        ImageFiltered(
+                                          imageFilter: ColorFilter.matrix([
+                                            0, 0, 0, 0, 30,
+                                            0, 0, 0, 0, 30,
+                                            0, 0, 0, 0, 30,
+                                            0, 0, 0, 1, 0,
+                                          ]),
+                                          child: Text(
+                                            comment.content,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppColors.textSecondary,
+                                              height: 1.4,
+                                              shadows: const [
+                                                Shadow(blurRadius: 8, color: Colors.black),
+                                                Shadow(blurRadius: 8, color: Colors.black),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        // Tombol reveal
+                                        Positioned.fill(
+                                          child: Container(
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.55),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                const Icon(Icons.visibility_outlined, size: 14, color: Colors.orange),
+                                                const SizedBox(width: 5),
+                                                const Text(
+                                                  'Ketuk untuk lihat spoiler',
+                                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.orange),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    comment.content,
+                                    style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+                                  ),
                               ],
                             ),
                           ),
@@ -717,62 +790,205 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
               color: AppColors.surface,
               border: Border(top: BorderSide(color: AppColors.divider)),
             ),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _commentController,
-                    focusNode: _commentFocus,
-                    enabled: isLoggedIn,
-                    maxLines: 3,
-                    minLines: 1,
-                    onChanged: (_) => setState(() {}),
-                    style: TextStyle(fontSize: 14, color: AppColors.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: isLoggedIn ? 'Tulis komentar...' : 'Masuk untuk komentar',
-                      hintStyle: TextStyle(color: AppColors.textMuted),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: AppColors.glassBorder),
+                // Spoiler toggle row
+                if (isLoggedIn)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _isSpoiler = !_isSpoiler),
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: _isSpoiler ? Colors.orange : AppColors.glassBorder,
+                                width: 1.5,
+                              ),
+                              color: _isSpoiler
+                                  ? Colors.orange.withValues(alpha: 0.2)
+                                  : Colors.transparent,
+                            ),
+                            child: _isSpoiler
+                                ? const Icon(Icons.check, size: 12, color: Colors.orange)
+                                : null,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Tandai sebagai spoiler',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _isSpoiler ? Colors.orange : AppColors.textMuted,
+                            ),
+                          ),
+                        ],
                       ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: AppColors.glassBorder),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: AppColors.primary),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: (isLoggedIn && _commentController.text.trim().isNotEmpty && !_isSending)
-                      ? () async {
-                          setState(() => _isSending = true);
-                          await ref.read(chapterCommentsProvider(widget.chapterId).notifier).postComment(
-                            userId: user.id,
-                            username: user.username,
-                            avatarUrl: user.avatarUrl,
-                            content: _commentController.text,
-                          );
-                          _commentController.clear();
-                          setState(() => _isSending = false);
-                        }
-                      : null,
-                  icon: _isSending
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Icon(
-                          Icons.send_rounded,
-                          color: (isLoggedIn && _commentController.text.trim().isNotEmpty) ? AppColors.primary : AppColors.textMuted,
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _commentController,
+                        focusNode: _commentFocus,
+                        enabled: isLoggedIn,
+                        maxLines: 3,
+                        minLines: 1,
+                        onChanged: (_) => setState(() {}),
+                        style: TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                        decoration: InputDecoration(
+                          hintText: isLoggedIn ? 'Tulis komentar...' : 'Masuk untuk komentar',
+                          hintStyle: TextStyle(color: AppColors.textMuted),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: AppColors.glassBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: _isSpoiler
+                                  ? Colors.orange.withValues(alpha: 0.5)
+                                  : AppColors.glassBorder,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: _isSpoiler ? Colors.orange : AppColors.primary,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      onPressed: (isLoggedIn && _commentController.text.trim().isNotEmpty && !_isSending)
+                          ? () async {
+                              setState(() => _isSending = true);
+                              await ref.read(chapterCommentsProvider(widget.chapterId).notifier).postComment(
+                                userId: user.id,
+                                username: user.username,
+                                avatarUrl: user.avatarUrl,
+                                content: _commentController.text,
+                                isSpoiler: _isSpoiler,
+                              );
+                              _commentController.clear();
+                              setState(() {
+                                _isSending = false;
+                                _isSpoiler = false;
+                              });
+                            }
+                          : null,
+                      icon: _isSending
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Icon(
+                              Icons.send_rounded,
+                              color: (isLoggedIn && _commentController.text.trim().isNotEmpty) ? AppColors.primary : AppColors.textMuted,
+                            ),
+                    ),
+                    ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Nav bar prev/next chapter — widget terpisah agar rebuild-nya
+// tidak mempengaruhi scroll/page position di ReaderScreen ────────
+class _ChapterNavBar extends ConsumerWidget {
+  final String comicId;
+  final String currentChapterId;
+  final void Function(String chapterId) onNavigate;
+
+  const _ChapterNavBar({
+    required this.comicId,
+    required this.currentChapterId,
+    required this.onNavigate,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chaptersAsync = ref.watch(comicChaptersProvider(comicId));
+
+    Chapter? prevChapter;
+    Chapter? nextChapter;
+    chaptersAsync.whenData((chapters) {
+      final idx = chapters.indexWhere((ch) => ch.id == currentChapterId);
+      if (idx != -1) {
+        if (idx > 0) nextChapter = chapters[idx - 1];
+        if (idx < chapters.length - 1) prevChapter = chapters[idx + 1];
+      }
+    });
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            Colors.black.withValues(alpha: 0.78),
+            Colors.transparent,
+          ],
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: prevChapter == null
+                      ? null
+                      : () => onNavigate(prevChapter!.id),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  label: const Text('Sebelumnya'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: Colors.white38,
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.22),
+                    ),
+                    backgroundColor: Colors.black.withValues(alpha: 0.28),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: nextChapter == null
+                      ? null
+                      : () => onNavigate(nextChapter!.id),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  label: const Text('Berikutnya'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(46),
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: Colors.white38,
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.22),
+                    ),
+                    backgroundColor: Colors.black.withValues(alpha: 0.28),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

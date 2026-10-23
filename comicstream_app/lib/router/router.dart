@@ -10,6 +10,8 @@ import '../presentation/screens/search/search_screen.dart';
 import '../presentation/screens/detail/comic_detail_screen.dart';
 import '../presentation/screens/reader/reader_screen.dart';
 import '../presentation/screens/bookmark/bookmark_screen.dart';
+import '../presentation/screens/bookmark/collections_screen.dart';
+import '../presentation/screens/bookmark/collection_detail_screen.dart';
 import '../presentation/screens/profile/profile_screen.dart';
 import '../presentation/screens/main/main_shell.dart';
 import '../presentation/screens/admin/admin_comics_screen.dart';
@@ -99,6 +101,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                 const NoTransitionPage(child: BookmarkScreen()),
           ),
           GoRoute(
+            path: '/collections',
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: CollectionsScreen()),
+          ),
+          GoRoute(
             path: '/profile',
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: ProfileScreen()),
@@ -117,6 +124,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => ReaderScreen(
           comicId: state.pathParameters['comicId']!,
           chapterId: state.pathParameters['chapterId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/collections/:id',
+        builder: (context, state) => CollectionDetailScreen(
+          collectionId: state.pathParameters['id']!,
         ),
       ),
     ],

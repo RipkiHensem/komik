@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/constants/app_constants.dart';
+import 'core/services/notification_service.dart';
 import 'app.dart';
 
 void main() async {
@@ -13,6 +14,12 @@ void main() async {
     url: AppConstants.supabaseUrl,
     publishableKey: AppConstants.supabaseAnonKey,
   );
+  // Notification failure must not prevent the app from opening.
+  try {
+    await NotificationService.instance.initialize();
+  } catch (error) {
+    debugPrint('Notification initialization failed: $error');
+  }
 
   // Set preferred orientations
   await SystemChrome.setPreferredOrientations([
@@ -30,9 +37,5 @@ void main() async {
     ),
   );
 
-  runApp(
-    const ProviderScope(
-      child: ComicStreamApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: YomuApp()));
 }

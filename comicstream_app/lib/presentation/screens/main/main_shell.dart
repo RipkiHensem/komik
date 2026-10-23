@@ -12,6 +12,7 @@ class MainShell extends StatelessWidget {
     (icon: Icons.explore_outlined, activeIcon: Icons.explore, label: 'Explore', path: '/home'),
     (icon: Icons.search_outlined, activeIcon: Icons.search, label: 'Search', path: '/search'),
     (icon: Icons.bookmark_border, activeIcon: Icons.bookmark, label: 'Bookmark', path: '/bookmarks'),
+    (icon: Icons.folder_special_outlined, activeIcon: Icons.folder_special_rounded, label: 'Koleksi', path: '/collections'),
     (icon: Icons.person_outline, activeIcon: Icons.person, label: 'Profil', path: '/profile'),
   ];
 

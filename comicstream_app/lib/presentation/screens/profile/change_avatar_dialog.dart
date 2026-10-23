@@ -1,7 +1,10 @@
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/utils/image_picker_helper.dart';
 import '../../../data/models/user.dart';
 import '../../../data/providers/providers.dart';
 import '../../widgets/proxied_image.dart';
@@ -29,7 +32,8 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
   late TextEditingController _urlController;
 
   String? _selectedAvatarUrl;
-  String? _pendingBase64Image;
+  Uint8List? _pendingImageBytes;
+  String _pendingImageExtension = 'jpg';
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -106,6 +110,39 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
         !_presets.any((p) => p['url'] == _selectedAvatarUrl)) {
       _urlController.text = _selectedAvatarUrl!;
     }
+    _recoverLostImage();
+  }
+
+  Future<void> _recoverLostImage() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final result = await ImagePicker().retrieveLostData();
+      if (result.file != null) await _selectImage(result.file!);
+      if (result.exception != null) throw result.exception!;
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _errorMessage =
+            'Foto sebelumnya gagal dipulihkan. Silakan pilih lagi.',
+      );
+    }
+  }
+
+  Future<void> _selectImage(XFile image) async {
+    final bytes = await image.readAsBytes();
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw const FormatException('Ukuran foto maksimal 5 MB.');
+    }
+    if (!mounted) return;
+    setState(() {
+      _pendingImageBytes = bytes;
+      _pendingImageExtension = image.name.contains('.')
+          ? image.name.split('.').last
+          : 'jpg';
+      _selectedAvatarUrl = null;
+      _urlController.clear();
+      _tabController.index = 1;
+    });
   }
 
   @override
@@ -115,23 +152,91 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
     super.dispose();
   }
 
-  Future<void> _handlePickFile() async {
+  Future<void> _handlePickImage(ImageSource source) async {
     setState(() {
       _errorMessage = null;
     });
 
     try {
-      final base64 = await pickImageBase64();
-      if (base64 != null && base64.isNotEmpty) {
-        setState(() {
-          _pendingBase64Image = base64;
-          _selectedAvatarUrl = null;
-        });
+      final image = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1024,
+        imageQuality: 85,
+      );
+      if (image != null) {
+        await _selectImage(image);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pemilihan foto dibatalkan.')),
+        );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _errorMessage = 'Gagal memilih gambar dari perangkat';
+        _errorMessage = e is PlatformException && e.code.contains('denied')
+            ? 'Izin kamera atau foto ditolak. Izinkan Yomu melalui Pengaturan HP, lalu coba lagi.'
+            : e is FormatException
+            ? e.message
+            : 'Gagal memilih gambar dari perangkat. Silakan coba lagi.';
       });
+    }
+  }
+
+  Future<void> _showImageSourceSheet() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Foto profil',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Ambil dari kamera'),
+                subtitle: const Text('Buka kamera perangkat'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Pilih dari galeri'),
+                subtitle: const Text('Pilih foto yang sudah ada'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source != null && mounted) {
+      await _handlePickImage(source);
     }
   }
 
@@ -141,15 +246,20 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
       _errorMessage = null;
     });
 
-    bool success = false;
-    // Base64/local upload tidak tersedia (butuh Supabase Storage).
-    // Gunakan URL avatar dari pilihan yang ada.
-    final finalUrl = _pendingBase64Image != null
-        ? null // base64 tidak bisa disimpan tanpa Storage
-        : _selectedAvatarUrl?.trim();
-    success = await ref
-        .read(authProvider.notifier)
-        .updateAvatar(finalUrl?.isNotEmpty == true ? finalUrl : null);
+    final success = _pendingImageBytes != null
+        ? await ref
+              .read(authProvider.notifier)
+              .uploadAvatarImage(
+                _pendingImageBytes!,
+                extension: _pendingImageExtension,
+              )
+        : await ref
+              .read(authProvider.notifier)
+              .updateAvatar(
+                _selectedAvatarUrl?.trim().isNotEmpty == true
+                    ? _selectedAvatarUrl!.trim()
+                    : null,
+              );
 
     if (!mounted) return;
 
@@ -218,10 +328,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 500,
-          maxHeight: dialogMaxHeight,
-        ),
+        constraints: BoxConstraints(maxWidth: 500, maxHeight: dialogMaxHeight),
         child: Column(
           children: [
             // ── Header ──────────────────────────────────────────
@@ -271,7 +378,10 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                     scale: 1.15,
                     child: IconButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(Icons.close_rounded, color: AppColors.textMuted),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: AppColors.textMuted,
+                      ),
                       tooltip: 'Tutup',
                     ),
                   ),
@@ -301,13 +411,6 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                               color: AppColors.primary,
                               width: 2.5,
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primary.withValues(alpha: 0.25),
-                                blurRadius: 14,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
                           ),
                           child: ClipOval(
                             child: _buildPreviewContent(initialLetter),
@@ -332,11 +435,11 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _pendingBase64Image != null
+                      _pendingImageBytes != null
                           ? 'Foto siap diunggah'
                           : (_selectedAvatarUrl != null
-                              ? 'Preview Avatar Terpilih'
-                              : 'Avatar Default (Inisial)'),
+                                ? 'Preview Avatar Terpilih'
+                                : 'Avatar Default (Inisial)'),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -351,7 +454,10 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
             if (_errorMessage != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.error.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
@@ -361,8 +467,11 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline_rounded,
-                        color: AppColors.error, size: 16),
+                    Icon(
+                      Icons.error_outline_rounded,
+                      color: AppColors.error,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -394,7 +503,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                   color: AppColors.primary,
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
-                labelColor: Colors.white,
+                labelColor: AppColors.background,
                 unselectedLabelColor: AppColors.textMuted,
                 labelStyle: const TextStyle(
                   fontSize: 12,
@@ -459,11 +568,17 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                       scale: 1.05,
                       child: TextButton.icon(
                         onPressed: _isLoading ? null : _removeAvatar,
-                        icon: Icon(Icons.delete_outline_rounded,
-                            size: 16, color: AppColors.error),
+                        icon: Icon(
+                          Icons.delete_outline_rounded,
+                          size: 16,
+                          color: AppColors.error,
+                        ),
                         label: Text(
                           'Hapus',
-                          style: TextStyle(color: AppColors.error, fontSize: 12),
+                          style: TextStyle(
+                            color: AppColors.error,
+                            fontSize: 12,
+                          ),
                         ),
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -480,7 +595,9 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: AppColors.divider),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
                       ),
                       child: Text(
                         'Batal',
@@ -493,7 +610,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                   ),
                   const SizedBox(width: 8),
                   HoverWidget(
-                    enableGlow: true,
+                    enableGlow: false,
                     glowColor: AppColors.primary,
                     scale: 1.05,
                     borderRadius: BorderRadius.circular(10),
@@ -501,8 +618,11 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                       onPressed: _isLoading ? null : _saveAvatar,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
+                        foregroundColor: AppColors.background,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 10),
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -516,11 +636,11 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                                 color: Colors.white,
                               ),
                             )
-                          : const Text(
+                          : Text(
                               'Simpan Foto',
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
-                                color: Colors.white,
+                                color: AppColors.background,
                                 fontSize: 13,
                               ),
                             ),
@@ -536,9 +656,9 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
   }
 
   Widget _buildPreviewContent(String initialLetter) {
-    if (_pendingBase64Image != null) {
-      return Image.network(
-        _pendingBase64Image!,
+    if (_pendingImageBytes != null) {
+      return Image.memory(
+        _pendingImageBytes!,
         width: 76,
         height: 76,
         fit: BoxFit.cover,
@@ -604,7 +724,8 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
           ),
           itemBuilder: (context, index) {
             final preset = _presets[index];
-            final isSelected = _pendingBase64Image == null &&
+            final isSelected =
+                _pendingImageBytes == null &&
                 _selectedAvatarUrl == preset['url'];
 
             return HoverWidget(
@@ -615,110 +736,115 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
                 child: InkWell(
                   onTap: () {
                     setState(() {
-                      _pendingBase64Image = null;
+                      _pendingImageBytes = null;
                       _selectedAvatarUrl = preset['url'];
                       _urlController.clear();
                     });
                   },
                   borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.primary.withValues(alpha: 0.15)
-                        : AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected ? AppColors.primary : AppColors.divider,
-                      width: isSelected ? 2 : 0.5,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
                     ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Container(
-                            width: avatarSize,
-                            height: avatarSize,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: AppColors.card,
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.divider,
-                                width: 1.5,
-                              ),
-                            ),
-                            child: ClipOval(
-                              child: ProxiedImage(
-                                imageUrl: preset['url']!,
-                                width: avatarSize,
-                                height: avatarSize,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          if (isSelected)
-                            Positioned(
-                              right: -2,
-                              bottom: -2,
-                              child: Container(
-                                width: 16,
-                                height: 16,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.primary.withValues(alpha: 0.15)
+                          : AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primary
+                            : AppColors.divider,
+                        width: isSelected ? 2 : 0.5,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: avatarSize,
+                              height: avatarSize,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.card,
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : AppColors.divider,
+                                  width: 1.5,
                                 ),
-                                child: const Icon(
-                                  Icons.check_rounded,
-                                  size: 11,
-                                  color: Colors.white,
+                              ),
+                              child: ClipOval(
+                                child: ProxiedImage(
+                                  imageUrl: preset['url']!,
+                                  width: avatarSize,
+                                  height: avatarSize,
+                                  fit: BoxFit.cover,
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Flexible(
-                        child: Text(
-                          preset['name']!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight:
-                                isSelected ? FontWeight.w700 : FontWeight.w600,
-                            color: isSelected
-                                ? AppColors.primary
-                                : AppColors.textPrimary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
+                            if (isSelected)
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: Container(
+                                  width: 16,
+                                  height: 16,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.check_rounded,
+                                    size: 11,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                      ),
-                      Flexible(
-                        child: Text(
-                          preset['role']!,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: AppColors.textMuted,
+                        const SizedBox(height: 4),
+                        Flexible(
+                          child: Text(
+                            preset['name']!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: isSelected
+                                  ? AppColors.primary
+                                  : AppColors.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
                         ),
-                      ),
-                    ],
+                        Flexible(
+                          child: Text(
+                            preset['role']!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.textMuted,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
         );
       },
     );
@@ -742,23 +868,23 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
           const SizedBox(height: 4),
           Text(
             'Pilih foto atau gambar dari komputer / galeri HP kamu (JPG, PNG, WebP)',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
           ),
           const SizedBox(height: 10),
           HoverWidget(
             scale: 1.02,
             borderRadius: BorderRadius.circular(10),
             child: OutlinedButton.icon(
-              onPressed: _handlePickFile,
-              icon: Icon(Icons.add_photo_alternate_rounded,
-                  color: AppColors.primary, size: 18),
+              onPressed: _isLoading ? null : _showImageSourceSheet,
+              icon: Icon(
+                Icons.add_a_photo_outlined,
+                color: AppColors.primary,
+                size: 18,
+              ),
               label: Text(
-                _pendingBase64Image != null
+                _pendingImageBytes != null
                     ? 'Ganti Foto Terpilih'
-                    : 'Pilih File Gambar',
+                    : 'Ambil atau Pilih Foto',
                 style: TextStyle(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w600,
@@ -808,10 +934,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
           const SizedBox(height: 4),
           Text(
             'Tempel tautan gambar dari internet (Pinterest, Discord, Imgur, dll)',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -821,19 +944,24 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
               hintText: 'https://example.com/foto.jpg',
               hintStyle: TextStyle(fontSize: 12, color: AppColors.textMuted),
               prefixIcon: const Icon(Icons.link_rounded, size: 18),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
               suffixIcon: HoverWidget(
                 scale: 1.15,
                 child: IconButton(
-                  icon: Icon(Icons.check_circle_rounded,
-                      color: AppColors.primary, size: 20),
+                  icon: Icon(
+                    Icons.check_circle_rounded,
+                    color: AppColors.primary,
+                    size: 20,
+                  ),
                   tooltip: 'Terapkan Link',
                   onPressed: () {
                     final url = _urlController.text.trim();
                     if (url.isNotEmpty) {
                       setState(() {
-                        _pendingBase64Image = null;
+                        _pendingImageBytes = null;
                         _selectedAvatarUrl = url;
                       });
                     }
@@ -844,7 +972,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
             onChanged: (val) {
               if (val.trim().isNotEmpty) {
                 setState(() {
-                  _pendingBase64Image = null;
+                  _pendingImageBytes = null;
                   _selectedAvatarUrl = val.trim();
                 });
               }

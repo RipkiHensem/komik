@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user.dart' as app_models;
 import '../models/bookmark.dart';
@@ -182,8 +184,9 @@ class SupabaseAuthService {
   /// The matching row is also enforced by RLS for every admin write.
   Future<bool> isAdmin(String email) async {
     final normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail.isEmpty || _client.auth.currentUser == null)
+    if (normalizedEmail.isEmpty || _client.auth.currentUser == null) {
       return false;
+    }
 
     final row = await _client
         .from('admin_users')
@@ -253,12 +256,43 @@ class SupabaseAuthService {
       'avatar_url': avatarUrl,
     });
 
-    return app_models.User.fromSupabase(
-      id: supaUser.id,
-      email: supaUser.email ?? '',
-      avatarUrl: avatarUrl,
-      createdAt: supaUser.createdAt,
-    );
+    final profile = await fetchFullProfile();
+    if (profile == null) throw Exception('Sesi berakhir. Silakan masuk lagi.');
+    return profile;
+  }
+
+  /// Uploads an avatar to Supabase Storage, then returns its public URL.
+  Future<app_models.User> uploadAvatarImage(
+    Uint8List bytes, {
+    required String extension,
+  }) async {
+    final supaUser = _client.auth.currentUser;
+    if (supaUser == null) throw Exception('Belum login');
+
+    final cleanExtension = extension.toLowerCase().replaceAll('.', '');
+    if (!{'jpg', 'jpeg', 'png', 'webp'}.contains(cleanExtension)) {
+      throw Exception('Gunakan foto JPG, PNG, atau WebP.');
+    }
+    if (bytes.isEmpty || bytes.length > 5 * 1024 * 1024) {
+      throw Exception('Foto harus berisi gambar dengan ukuran maksimal 5 MB.');
+    }
+    final path =
+        '${supaUser.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$cleanExtension';
+    final contentType = switch (cleanExtension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+
+    await _client.storage
+        .from('avatars')
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(contentType: contentType, upsert: false),
+        );
+    final avatarUrl = _client.storage.from('avatars').getPublicUrl(path);
+    return updateAvatar(avatarUrl);
   }
 
   // ── Bookmarks (Supabase) ──────────────────────────────────

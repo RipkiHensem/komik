@@ -31,15 +31,15 @@ class AppScrollBehavior extends MaterialScrollBehavior {
   }
 }
 
-/// Root widget for ComicStream app
-class ComicStreamApp extends ConsumerStatefulWidget {
-  const ComicStreamApp({super.key});
+/// Root widget for Yomu app
+class YomuApp extends ConsumerStatefulWidget {
+  const YomuApp({super.key});
 
   @override
-  ConsumerState<ComicStreamApp> createState() => _ComicStreamAppState();
+  ConsumerState<YomuApp> createState() => _YomuAppState();
 }
 
-class _ComicStreamAppState extends ConsumerState<ComicStreamApp> {
+class _YomuAppState extends ConsumerState<YomuApp> {
   late final StreamSubscription<AuthState> _authSubscription;
 
   @override
@@ -69,7 +69,7 @@ class _ComicStreamAppState extends ConsumerState<ComicStreamApp> {
     AppColors.isDark = isDark;
 
     return MaterialApp.router(
-      title: 'ComicStream',
+      title: 'Yomu',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

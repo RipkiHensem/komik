@@ -66,13 +66,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                       decoration: BoxDecoration(
                         gradient: AppColors.primaryGradient,
                         borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withValues(alpha: 0.4),
-                            blurRadius: 30,
-                            spreadRadius: 5,
-                          ),
-                        ],
                       ),
                       child: const Icon(
                         Icons.auto_stories_rounded,
@@ -83,7 +76,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                     const SizedBox(height: 24),
                     // App name
                     const Text(
-                      'ComicStream',
+                      'Yomu',
                       style: TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.w800,
@@ -101,7 +94,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                       ),
                     ),
                     const SizedBox(height: 40),
-                    const SizedBox(
+                    SizedBox(
                       width: 24,
                       height: 24,
                       child: CircularProgressIndicator(

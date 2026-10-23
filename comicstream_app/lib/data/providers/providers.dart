@@ -139,6 +139,23 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  Future<bool> uploadAvatarImage(
+    Uint8List bytes, {
+    required String extension,
+  }) async {
+    try {
+      final updatedUser = await _authService.uploadAvatarImage(
+        bytes,
+        extension: extension,
+      );
+      state = state.copyWith(user: updatedUser, errorMessage: null);
+      return true;
+    } catch (e) {
+      state = state.copyWith(errorMessage: _parseError(e));
+      return false;
+    }
+  }
+
   // uploadAvatarBase64 dihapus karena Supabase Storage lebih cocok
   // untuk tahap ini cukup simpan URL avatar saja
 
@@ -452,44 +469,49 @@ final latestComicsByFormatProvider =
       return homeState.comics;
     });
 
-final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
-  (ref, endpoint) async {
-    final liveApi = ref.read(mangaApiServiceProvider);
-    final dbApi = ref.read(supabaseComicServiceProvider);
+final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>((
+  ref,
+  endpoint,
+) async {
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
 
-    // Admin-managed rows override metadata and may provide their own chapters.
-    Map<String, dynamic>? managedDetail;
-    try {
-      managedDetail = await dbApi.getComicDetail(endpoint);
-      if ((managedDetail['chapters'] as List?)?.isNotEmpty == true) {
-        return dbApi.filterHiddenChapters(managedDetail);
-      }
-    } catch (e) {
-      debugPrint('[Supabase] no managed detail for $endpoint: $e');
-    }
-
-    try {
-      final detail = await liveApi.getComicDetail(endpoint);
-      if (detail.isNotEmpty &&
-          (detail['chapters'] as List?)?.isNotEmpty == true) {
-        if (managedDetail != null) {
-          return dbApi.filterHiddenChapters({
-            ...detail,
-            'comic': managedDetail['comic'],
-          });
-        }
-        return dbApi.filterHiddenChapters(detail);
-      }
-    } catch (e) {
-      debugPrint('[Live API Fallback] comicDetail: $e');
-    }
-
-    if (managedDetail != null) {
+  // Admin-managed rows override metadata and may provide their own chapters.
+  Map<String, dynamic>? managedDetail;
+  try {
+    managedDetail = await dbApi.getComicDetail(endpoint);
+    if ((managedDetail['chapters'] as List?)?.isNotEmpty == true) {
       return dbApi.filterHiddenChapters(managedDetail);
     }
-    return dbApi.filterHiddenChapters(await dbApi.getComicDetail(endpoint));
-  },
-);
+  } catch (e) {
+    // "Comic not found" adalah expected untuk komik dari API eksternal — jangan print
+    final msg = e.toString();
+    if (!msg.contains('Comic not found in Supabase')) {
+      debugPrint('[Supabase] no managed detail for $endpoint: $e');
+    }
+  }
+
+  try {
+    final detail = await liveApi.getComicDetail(endpoint);
+    if (detail.isNotEmpty &&
+        (detail['chapters'] as List?)?.isNotEmpty == true) {
+      if (managedDetail != null) {
+        return dbApi.filterHiddenChapters({
+          ...detail,
+          'comic': managedDetail['comic'],
+        });
+      }
+      return dbApi.filterHiddenChapters(detail);
+    }
+  } catch (e) {
+    debugPrint('[Live API Fallback] comicDetail: $e');
+  }
+
+  if (managedDetail != null) {
+    return dbApi.filterHiddenChapters(managedDetail);
+  }
+  return dbApi.filterHiddenChapters(await dbApi.getComicDetail(endpoint));
+});
 
 /// Provider khusus untuk data Comic dari detail
 final comicFromDetailProvider = FutureProvider.family<Comic, String>((
@@ -610,9 +632,12 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
 
 final bookmarksProvider =
     StateNotifierProvider<BookmarksNotifier, AsyncValue<List<Bookmark>>>((ref) {
-      final authState = ref.watch(authProvider);
+      // Gunakan ref.read agar BookmarksNotifier tidak dibuat ulang setiap kali
+      // authProvider berubah state (mis. setelah recordProgress). Pembuatan ulang
+      // notifier ini dapat menyebabkan reader comic refresh dan reset.
+      final authState = ref.read(authProvider);
       final isAuth = authState.status == AuthStatus.authenticated;
-      return BookmarksNotifier(ref.watch(supabaseAuthServiceProvider), isAuth);
+      return BookmarksNotifier(ref.read(supabaseAuthServiceProvider), isAuth);
     });
 
 // ── History Provider (Supabase) ───────────────────────────────
@@ -687,9 +712,32 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
 
 final historyProvider =
     StateNotifierProvider<HistoryNotifier, AsyncValue<List<Bookmark>>>((ref) {
-      final authState = ref.watch(authProvider);
+      // Gunakan ref.read agar HistoryNotifier tidak dibuat ulang setiap kali
+      // authProvider berubah state (mis. setelah recordProgress selesai).
+      // Pembuatan ulang notifier di sini menyebabkan reader comic refresh dan
+      // chapter list di-reset secara bertahap.
+      final authState = ref.read(authProvider);
       final isAuth = authState.status == AuthStatus.authenticated;
-      return HistoryNotifier(ref.watch(supabaseAuthServiceProvider), isAuth);
+      final notifier = HistoryNotifier(
+        ref.read(supabaseAuthServiceProvider),
+        isAuth,
+      );
+
+      // Pantau perubahan status auth: jika user login ulang, muat ulang history
+      // agar data tidak tertunda / kosong setelah re-login.
+      ref.listen<AuthState>(authProvider, (previous, next) {
+        final wasAuth = previous?.status == AuthStatus.authenticated;
+        final nowAuth = next.status == AuthStatus.authenticated;
+        if (!wasAuth && nowAuth) {
+          // User baru saja login → reload history segera
+          notifier.loadHistory();
+        } else if (wasAuth && !nowAuth) {
+          // User logout → kosongkan history
+          notifier.clearAll();
+        }
+      });
+
+      return notifier;
     });
 
 // ── Read Chapters Provider ────────────────────────────────────
@@ -808,6 +856,24 @@ class SearchState {
 final searchStateProvider = StateProvider<SearchState>(
   (ref) => const SearchState(),
 );
+
+/// Provider untuk search langsung berdasarkan query — dipakai di sheet
+/// tanpa mengubah global searchStateProvider
+final searchComicsByQueryProvider = FutureProvider.family<List<Comic>, String>((
+  ref,
+  query,
+) async {
+  if (query.trim().length < 2) return [];
+  final liveApi = ref.read(mangaApiServiceProvider);
+  final dbApi = ref.read(supabaseComicServiceProvider);
+  try {
+    final result = await liveApi.search(query.trim());
+    if (result.isNotEmpty) return result;
+    return await dbApi.search(query.trim());
+  } catch (_) {
+    return await dbApi.search(query.trim());
+  }
+});
 
 final searchComicsProvider = FutureProvider<List<Comic>>((ref) async {
   final searchState = ref.watch(searchStateProvider);
@@ -1090,6 +1156,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
     required String username,
     String? avatarUrl,
     required String content,
+    bool isSpoiler = false,
   }) async {
     if (content.trim().isEmpty) return;
     try {
@@ -1099,6 +1166,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
         'username': username,
         'avatar_url': avatarUrl,
         'content': content.trim(),
+        'is_spoiler': isSpoiler,
       });
       await loadComments();
     } catch (e) {
@@ -1112,6 +1180,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
         avatarUrl: avatarUrl,
         content: content.trim(),
         createdAt: DateTime.now(),
+        isSpoiler: isSpoiler,
       );
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data([optimistic, ...current]);
@@ -1174,6 +1243,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
     required String username,
     String? avatarUrl,
     required String content,
+    bool isSpoiler = false,
   }) async {
     if (content.trim().isEmpty) return;
     try {
@@ -1183,6 +1253,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
         'username': username,
         'avatar_url': avatarUrl,
         'content': content.trim(),
+        'is_spoiler': isSpoiler,
       });
       await loadComments();
     } catch (e) {
@@ -1196,6 +1267,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
         avatarUrl: avatarUrl,
         content: content.trim(),
         createdAt: DateTime.now(),
+        isSpoiler: isSpoiler,
       );
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data([optimistic, ...current]);

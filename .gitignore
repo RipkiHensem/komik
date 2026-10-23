@@ -25,5 +25,6 @@ build/
 # Agents & Temp
 .agents/
 scratch/
+tmp/
 *.log
 .temp/

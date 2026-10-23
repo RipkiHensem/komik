@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/services/notification_service.dart';
 import '../../../data/providers/providers.dart';
 import '../../widgets/proxied_image.dart';
 import 'change_avatar_dialog.dart';
@@ -53,15 +54,6 @@ class ProfileScreen extends ConsumerWidget {
                                         color: AppColors.primary,
                                         width: 2.5,
                                       ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: AppColors.primary.withValues(
-                                            alpha: 0.35,
-                                          ),
-                                          blurRadius: 18,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
                                     ),
                                     child: ClipOval(
                                       child:
@@ -374,9 +366,43 @@ class ProfileScreen extends ConsumerWidget {
                     },
                   ),
                   _buildMenuItem(
+                    icon: Icons.notifications_outlined,
+                    title: 'Tes Notifikasi',
+                    subtitle: 'Kirim pengingat lanjut membaca',
+                    onTap: () async {
+                      try {
+                        final shown = await NotificationService.instance
+                            .showReadingReminder();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              shown
+                                  ? 'Notifikasi pengingat sudah dikirim.'
+                                  : 'Izin notifikasi ditolak. Aktifkan dari Pengaturan HP.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      } catch (_) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              NotificationService.instance.isSupported
+                                  ? 'Notifikasi gagal dikirim. Silakan coba lagi.'
+                                  : 'Notifikasi tersedia pada aplikasi Android.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                  _buildMenuItem(
                     icon: Icons.info_outline_rounded,
                     title: 'Tentang Aplikasi',
-                    subtitle: 'ComicStream v1.0.0',
+                    subtitle: 'Yomu v1.0.0',
                     onTap: () => _showAboutAppDialog(context),
                   ),
 
@@ -386,7 +412,7 @@ class ProfileScreen extends ConsumerWidget {
                   if (user == null)
                     HoverWidget(
                       scale: 1.03,
-                      enableGlow: true,
+                      enableGlow: false,
                       glowColor: AppColors.primary,
                       borderRadius: BorderRadius.circular(14),
                       child: SizedBox(
@@ -632,13 +658,6 @@ class ProfileScreen extends ConsumerWidget {
                   decoration: BoxDecoration(
                     gradient: AppColors.primaryGradient,
                     borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.3),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
                   ),
                   child: const Icon(
                     Icons.auto_stories_rounded,
@@ -648,7 +667,7 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'ComicStream',
+                  'Yomu',
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,

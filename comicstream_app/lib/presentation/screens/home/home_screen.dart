@@ -20,7 +20,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final ScrollController _homeScrollController = ScrollController();
-  static const int _latestPageSize = 8;
+  static const int _latestPageSize = 12;
   static const double _latestGridMaxWidth = 440;
   static const double _mobileAppMaxWidth = 480;
   int _latestPage = 0;
@@ -85,11 +85,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       titleSpacing: 16,
                       title: Row(
                         children: [
-                          Icon(Icons.auto_stories_outlined, size: 28, color: AppColors.textPrimary),
-                          const SizedBox(width: 8),
                           Flexible(
                             child: Text(
-                              'ComicStream',
+                              'Yomu',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.plusJakartaSans(

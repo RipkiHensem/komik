@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../widgets/proxied_image.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
@@ -9,6 +10,7 @@ import '../../../data/models/comic.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/comment.dart';
 import '../../../data/models/bookmark.dart';
+import '../bookmark/collections_screen.dart';
 import '../../widgets/chapter_tile.dart';
 import '../../widgets/genre_chip.dart';
 import '../../widgets/shimmer_loading.dart';
@@ -188,12 +190,31 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     super.dispose();
   }
 
+  Future<void> _showSaveToCollectionSheet(BuildContext context, Comic comic) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _SaveToCollectionSheet(comic: comic),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final comicAsync = ref.watch(comicFromDetailProvider(widget.comicId));
     final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
     final readChapters = ref.watch(readChaptersProvider(widget.comicId));
     final isAdmin = ref.watch(isAdminProvider).valueOrNull == true;
+    final history = ref.watch(historyProvider).valueOrNull ?? const <Bookmark>[];
+    Bookmark? readingProgress;
+    for (final entry in history) {
+      if (entry.comicId == widget.comicId && entry.lastChapterId != null) {
+        readingProgress = entry;
+        break;
+      }
+    }
+    final continueChapterId = readingProgress?.lastChapterId;
+    final hasReadingProgress = continueChapterId != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -348,7 +369,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                       Expanded(
                         child: HoverWidget(
                           scale: 1.02,
-                          enableGlow: true,
+                          enableGlow: false,
                           glowColor: AppColors.primary,
                           borderRadius: BorderRadius.circular(14),
                           child: SizedBox(
@@ -358,16 +379,15 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                             decoration: BoxDecoration(
                               gradient: AppColors.primaryGradient,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.4),
-                                  blurRadius: 14,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
                             ),
                             child: ElevatedButton.icon(
                               onPressed: () {
+                                if (continueChapterId != null) {
+                                  context.push(
+                                    '/comic/${widget.comicId}/chapter/$continueChapterId',
+                                  );
+                                  return;
+                                }
                                 final chapters = ref.read(comicChaptersProvider(widget.comicId));
                                 chapters.whenData((chapterList) {
                                   if (chapterList.isNotEmpty) {
@@ -381,8 +401,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                                 });
                               },
                               icon: const Icon(Icons.play_arrow_rounded, size: 20, color: Colors.white),
-                              label: const Text(
-                                'Mulai Baca',
+                              label: Text(
+                                hasReadingProgress ? 'Lanjutkan Baca' : 'Mulai Baca',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -499,6 +519,38 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                             ),
                           ),
                         ),
+                      ),
+                      const SizedBox(width: 4),
+                      // Tombol Simpan ke Koleksi (icon only)
+                      IconButton(
+                        tooltip: 'Simpan ke Koleksi',
+                        onPressed: () {
+                          final isAuth = ref.read(authProvider).user != null;
+                          if (!isAuth) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text('Masuk untuk menyimpan ke koleksi'),
+                                action: SnackBarAction(
+                                  label: 'Masuk',
+                                  textColor: AppColors.primary,
+                                  onPressed: () => context.push('/login'),
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          _showSaveToCollectionSheet(context, comic);
+                        },
+                        style: IconButton.styleFrom(
+                          minimumSize: const Size(44, 44),
+                          backgroundColor: AppColors.surface,
+                          foregroundColor: AppColors.textPrimary,
+                          side: BorderSide(color: AppColors.glassBorder),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.folder_special_outlined, size: 20),
                       ),
                       if (isAdmin) ...[
                         const SizedBox(width: 4),
@@ -865,13 +917,6 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                       decoration: BoxDecoration(
                         gradient: AppColors.primaryGradient,
                         borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
                       ),
                       child: _isSendingComment
                           ? const Padding(
@@ -1566,5 +1611,409 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
         ),
       ),
     ];
+  }
+}
+
+// ── Sheet: simpan komik ke koleksi ────────────────────────────
+class _SaveToCollectionSheet extends ConsumerStatefulWidget {
+  final Comic comic;
+  const _SaveToCollectionSheet({required this.comic});
+
+  @override
+  ConsumerState<_SaveToCollectionSheet> createState() =>
+      _SaveToCollectionSheetState();
+}
+
+class _SaveToCollectionSheetState
+    extends ConsumerState<_SaveToCollectionSheet> {
+  final Set<String> _processing = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final collectionsAsync = ref.watch(myCollectionsProvider);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      minChildSize: 0.35,
+      maxChildSize: 0.85,
+      expand: false,
+      builder: (ctx, scrollCtrl) => Container(
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: AppColors.glassBorder),
+        ),
+        child: Column(
+          children: [
+            // Handle
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.glassBorder,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Simpan ke Koleksi',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          widget.comic.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: AppColors.textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: AppColors.divider, height: 1),
+            // List koleksi
+            Expanded(
+              child: collectionsAsync.when(
+                data: (collections) {
+                  if (collections.isEmpty) {
+                    return _buildEmpty(ctx);
+                  }
+                  return ListView.builder(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    itemCount: collections.length + 1,
+                    itemBuilder: (context, index) {
+                      // Baris terakhir: tombol buat koleksi baru
+                      if (index == collections.length) {
+                        return _buildNewCollectionTile(ctx);
+                      }
+                      final col = collections[index];
+                      final alreadyIn = col.items
+                          .any((i) => i.comicId == widget.comic.id);
+                      final isProcessing = _processing.contains(col.id);
+
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.glassBorder),
+                          ),
+                          child: col.previewCovers.isNotEmpty
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: ProxiedImage(
+                                    imageUrl: col.previewCovers.first,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : Icon(Icons.folder_rounded,
+                                  color: AppColors.textMuted, size: 22),
+                        ),
+                        title: Text(
+                          col.name,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${col.itemCount} komik · ${col.isPublic ? "Publik" : "Privat"}',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                        trailing: isProcessing
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : alreadyIn
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '✓ Tersimpan',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.primary,
+                                      ),
+                                    ),
+                                  )
+                                : ElevatedButton(
+                                    onPressed: () async {
+                                      setState(() =>
+                                          _processing.add(col.id));
+                                      await ref
+                                          .read(myCollectionsProvider
+                                              .notifier)
+                                          .addComic(
+                                            col.id,
+                                            comicId: widget.comic.id,
+                                            comicTitle: widget.comic.title,
+                                            comicCoverUrl:
+                                                widget.comic.coverUrl,
+                                          );
+                                      setState(() =>
+                                          _processing.remove(col.id));
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: AppColors.background,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14, vertical: 6),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                      ),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: Text(
+                                      'Simpan',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                      );
+                    },
+                  );
+                },
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (e, _) => _buildEmpty(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpty(BuildContext ctx) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.folder_open_rounded,
+              size: 40, color: AppColors.textMuted.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            'Belum punya koleksi',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Buat koleksi pertamamu untuk mulai menyimpan komik.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 12.5,
+              color: AppColors.textMuted,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildNewCollectionTile(ctx),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNewCollectionTile(BuildContext ctx) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.3)),
+        ),
+        child: Icon(Icons.add_rounded, color: AppColors.primary),
+      ),
+      title: Text(
+        'Buat Koleksi Baru',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: AppColors.primary,
+        ),
+      ),
+      onTap: () async {
+        Navigator.pop(ctx);
+        await _showCreateAndAdd(ctx);
+      },
+    );
+  }
+
+  Future<void> _showCreateAndAdd(BuildContext ctx) async {
+    final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    bool isPublic = true;
+
+    await showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setS) => AlertDialog(
+          backgroundColor: AppColors.card,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: AppColors.glassBorder),
+          ),
+          title: Text('Buat Koleksi Baru',
+              style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                style: TextStyle(color: AppColors.textPrimary),
+                decoration: InputDecoration(
+                  labelText: 'Nama Koleksi',
+                  labelStyle: TextStyle(color: AppColors.textMuted),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: AppColors.primary),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () => setS(() => isPublic = !isPublic),
+                child: Row(children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(
+                        color: isPublic
+                            ? AppColors.primary
+                            : AppColors.glassBorder,
+                        width: 1.5,
+                      ),
+                      color: isPublic
+                          ? AppColors.primary.withValues(alpha: 0.15)
+                          : Colors.transparent,
+                    ),
+                    child: isPublic
+                        ? Icon(Icons.check,
+                            size: 13, color: AppColors.primary)
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Text('Publik',
+                      style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                ]),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text('Batal',
+                  style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                final newCol = await ref
+                    .read(myCollectionsProvider.notifier)
+                    .create(
+                      name: nameCtrl.text,
+                      description: descCtrl.text.isEmpty
+                          ? null
+                          : descCtrl.text,
+                      isPublic: isPublic,
+                    );
+                if (newCol != null) {
+                  await ref
+                      .read(myCollectionsProvider.notifier)
+                      .addComic(
+                        newCol.id,
+                        comicId: widget.comic.id,
+                        comicTitle: widget.comic.title,
+                        comicCoverUrl: widget.comic.coverUrl,
+                      );
+                }
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Komik disimpan ke koleksi "${nameCtrl.text}"'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.background,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Text('Buat & Simpan',
+                  style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

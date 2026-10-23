@@ -53,9 +53,9 @@ class Bookmark {
 
   /// Progress display text
   String get progressText {
-    if (lastChapterNumber != null) {
-      return 'Ch. $lastChapterNumber — Hal. $lastPage';
+    if (lastChapterNumber != null && lastChapterNumber! > 0) {
+      return 'Chapter $lastChapterNumber';
     }
-    return 'Halaman $lastPage';
+    return 'Chapter terakhir';
   }
 }

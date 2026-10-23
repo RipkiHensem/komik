@@ -98,41 +98,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       clipBehavior: Clip.none,
                       alignment: Alignment.center,
                       children: [
-                        // Ambient glow decorations
-                        Positioned(
-                          top: -30,
-                          child: Container(
-                            width: 280,
-                            height: 280,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.18),
-                                  blurRadius: 120,
-                                  spreadRadius: 30,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          bottom: -20,
-                          child: Container(
-                            width: 220,
-                            height: 220,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.secondary.withValues(alpha: 0.10),
-                                  blurRadius: 100,
-                                  spreadRadius: 20,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
 
                         // Card container
                         Container(
@@ -147,15 +112,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: AppColors.isDark ? 0.45 : 0.08),
-                                blurRadius: 40,
-                                offset: const Offset(0, 16),
-                                spreadRadius: -4,
-                              ),
-                              BoxShadow(
-                                color: AppColors.primary.withValues(alpha: 0.06),
+                                color: Colors.black.withValues(alpha: AppColors.isDark ? 0.25 : 0.08),
                                 blurRadius: 24,
-                                offset: const Offset(0, 4),
+                                offset: const Offset(0, 8),
+                                spreadRadius: -4,
                               ),
                             ],
                           ),
@@ -175,13 +135,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 decoration: BoxDecoration(
                                   gradient: AppColors.primaryGradient,
                                   borderRadius: BorderRadius.circular(18),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppColors.primary.withValues(alpha: 0.35),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
                                 ),
                                 child: const Icon(
                                   Icons.auto_stories_rounded,
@@ -389,7 +342,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                             // Register button
                             HoverWidget(
                               scale: 1.025,
-                              enableGlow: true,
+                              enableGlow: false,
                               glowColor: AppColors.primary,
                               borderRadius: BorderRadius.circular(12),
                               child: SizedBox(

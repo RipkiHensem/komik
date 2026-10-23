@@ -6,6 +6,7 @@ import '../../widgets/proxied_image.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
 import '../../../data/models/bookmark.dart';
+import '../../../data/models/comic.dart';
 import '../../widgets/error_view.dart';
 import '../../widgets/shimmer_loading.dart';
 import '../../widgets/hover_builder.dart';
@@ -26,7 +27,11 @@ class _BookmarkScreenState extends ConsumerState<BookmarkScreen>
   void initState() {
     super.initState();
     final initialTab = ref.read(bookmarkTabProvider).clamp(0, 1);
-    _tabController = TabController(length: 2, vsync: this, initialIndex: initialTab);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: initialTab,
+    );
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         ref.read(bookmarkTabProvider.notifier).state = _tabController.index;
@@ -49,7 +54,8 @@ class _BookmarkScreenState extends ConsumerState<BookmarkScreen>
       }
     });
 
-    final bookmarksCount = ref.watch(bookmarksProvider).valueOrNull?.length ?? 0;
+    final bookmarksCount =
+        ref.watch(bookmarksProvider).valueOrNull?.length ?? 0;
     final historyCount = ref.watch(historyProvider).valueOrNull?.length ?? 0;
 
     return Scaffold(
@@ -69,13 +75,6 @@ class _BookmarkScreenState extends ConsumerState<BookmarkScreen>
                     decoration: BoxDecoration(
                       gradient: AppColors.primaryGradient,
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.35),
-                          blurRadius: 12,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
                     ),
                     child: const Icon(
                       Icons.collections_bookmark_rounded,
@@ -127,13 +126,6 @@ class _BookmarkScreenState extends ConsumerState<BookmarkScreen>
                   indicator: BoxDecoration(
                     gradient: AppColors.primaryGradient,
                     borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   indicatorSize: TabBarIndicatorSize.tab,
                   dividerColor: Colors.transparent,
@@ -236,10 +228,7 @@ class _BookmarkScreenState extends ConsumerState<BookmarkScreen>
             Expanded(
               child: TabBarView(
                 controller: _tabController,
-                children: [
-                  _BookmarkTab(),
-                  _HistoryTab(),
-                ],
+                children: [_BookmarkTab(), _HistoryTab()],
               ),
             ),
           ],
@@ -258,7 +247,8 @@ class _BookmarkTab extends ConsumerWidget {
       return _buildEmptyState(
         context,
         title: 'Masuk untuk Simpan Bookmark',
-        subtitle: 'Masuk atau buat akun agar komik favoritmu tersimpan rapi dan dapat diakses kapan saja.',
+        subtitle:
+            'Masuk atau buat akun agar komik favoritmu tersimpan rapi dan dapat diakses kapan saja.',
         icon: Icons.bookmark_add_outlined,
         buttonLabel: 'Masuk ke Akun',
         buttonIcon: Icons.login_rounded,
@@ -274,7 +264,8 @@ class _BookmarkTab extends ConsumerWidget {
           return _buildEmptyState(
             context,
             title: 'Belum Ada Bookmark',
-            subtitle: 'Simpan komik favoritmu dengan mengetuk ikon bookmark pada halaman komik agar tersusun rapi di sini.',
+            subtitle:
+                'Simpan komik favoritmu dengan mengetuk ikon bookmark pada halaman komik agar tersusun rapi di sini.',
             icon: Icons.bookmark_add_outlined,
           );
         }
@@ -290,15 +281,33 @@ class _BookmarkTab extends ConsumerWidget {
             itemCount: bookmarks.length,
             itemBuilder: (context, index) {
               final bookmark = bookmarks[index];
-              return _BookmarkCard(
-                bookmark: bookmark,
-                onDelete: () => ref.read(bookmarksProvider.notifier).removeBookmarkByComicId(bookmark.comicId),
-                onTap: () => context.push('/comic/${bookmark.comicId}'),
-                onContinue: bookmark.lastChapterId != null
-                    ? () => context.push('/comic/${bookmark.comicId}/chapter/${bookmark.lastChapterId}')
-                    : null,
-                icon: Icons.bookmark_rounded,
-                iconColor: AppColors.primary,
+              // Jika comicTitle null/kosong, ambil dari comicFromDetailProvider
+              // agar kartu tidak tampil sebagai "Untitled"
+              return Consumer(
+                builder: (context, ref, _) {
+                  final detailAsync = ref.watch(
+                    comicFromDetailProvider(bookmark.comicId),
+                  );
+                  final displayItem =
+                      detailAsync.whenOrNull(
+                        data: (comic) => _withComicMetadata(bookmark, comic),
+                      ) ??
+                      bookmark;
+                  return _BookmarkCard(
+                    bookmark: displayItem,
+                    onDelete: () => ref
+                        .read(bookmarksProvider.notifier)
+                        .removeBookmarkByComicId(bookmark.comicId),
+                    onTap: () => context.push('/comic/${bookmark.comicId}'),
+                    onContinue: bookmark.lastChapterId != null
+                        ? () => context.push(
+                            '/comic/${bookmark.comicId}/chapter/${bookmark.lastChapterId}',
+                          )
+                        : null,
+                    icon: Icons.bookmark_rounded,
+                    iconColor: AppColors.primary,
+                  );
+                },
               );
             },
           ),
@@ -333,7 +342,8 @@ class _HistoryTab extends ConsumerWidget {
       return _buildEmptyState(
         context,
         title: 'Masuk untuk Catat Riwayat',
-        subtitle: 'Masuk agar chapter dan posisi komik yang kamu baca tersimpan otomatis di akunmu.',
+        subtitle:
+            'Masuk agar chapter dan posisi komik yang kamu baca tersimpan otomatis di akunmu.',
         icon: Icons.history_toggle_off_rounded,
         buttonLabel: 'Masuk ke Akun',
         buttonIcon: Icons.login_rounded,
@@ -349,7 +359,8 @@ class _HistoryTab extends ConsumerWidget {
           return _buildEmptyState(
             context,
             title: 'Riwayat Baca Kosong',
-            subtitle: 'Komik dan chapter yang kamu baca akan otomatis tersimpan di sini agar kamu bisa lanjut kapan saja.',
+            subtitle:
+                'Komik dan chapter yang kamu baca akan otomatis tersimpan di sini agar kamu bisa lanjut kapan saja.',
             icon: Icons.history_toggle_off_rounded,
           );
         }
@@ -440,7 +451,10 @@ class _HistoryTab extends ConsumerWidget {
                     child: HoverWidget(
                       scale: 1.08,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         child: Row(
                           children: [
                             Icon(
@@ -477,15 +491,49 @@ class _HistoryTab extends ConsumerWidget {
                   itemCount: history.length,
                   itemBuilder: (context, index) {
                     final item = history[index];
-                    return _BookmarkCard(
-                      bookmark: item,
-                      onDelete: () => ref.read(historyProvider.notifier).deleteEntry(item.id),
-                      onTap: () => context.push('/comic/${item.comicId}'),
-                      onContinue: item.lastChapterId != null
-                          ? () => context.push('/comic/${item.comicId}/chapter/${item.lastChapterId}')
-                          : null,
-                      icon: Icons.history_rounded,
-                      iconColor: AppColors.secondary,
+                    return Consumer(
+                      builder: (context, ref, _) {
+                        final detailAsync = ref.watch(
+                          comicFromDetailProvider(item.comicId),
+                        );
+                        final chaptersAsync = ref.watch(
+                          comicChaptersProvider(item.comicId),
+                        );
+                        final lastChapterNumber = chaptersAsync.whenOrNull(
+                          data: (chapters) {
+                            for (final chapter in chapters) {
+                              if (chapter.id == item.lastChapterId) {
+                                return chapter.chapterNumber;
+                              }
+                            }
+                            return null;
+                          },
+                        );
+                        final displayItem =
+                            detailAsync.whenOrNull(
+                              data: (comic) => _withComicMetadata(
+                                item,
+                                comic,
+                                lastChapterNumber: lastChapterNumber,
+                              ),
+                            ) ??
+                            item;
+
+                        return _BookmarkCard(
+                          bookmark: displayItem,
+                          onDelete: () => ref
+                              .read(historyProvider.notifier)
+                              .deleteEntry(item.id),
+                          onTap: () => context.push('/comic/${item.comicId}'),
+                          onContinue: item.lastChapterId != null
+                              ? () => context.push(
+                                  '/comic/${item.comicId}/chapter/${item.lastChapterId}',
+                                )
+                              : null,
+                          icon: Icons.history_rounded,
+                          iconColor: AppColors.secondary,
+                        );
+                      },
                     );
                   },
                 ),
@@ -512,6 +560,28 @@ class _HistoryTab extends ConsumerWidget {
       ),
     );
   }
+}
+
+Bookmark _withComicMetadata(
+  Bookmark bookmark,
+  Comic comic, {
+  int? lastChapterNumber,
+}) {
+  return Bookmark(
+    id: bookmark.id,
+    userId: bookmark.userId,
+    comicId: bookmark.comicId,
+    lastChapterId: bookmark.lastChapterId,
+    lastPage: bookmark.lastPage,
+    createdAt: bookmark.createdAt,
+    comicTitle: bookmark.comicTitle?.trim().isNotEmpty == true
+        ? bookmark.comicTitle
+        : comic.title,
+    comicCoverUrl: bookmark.comicCoverUrl?.trim().isNotEmpty == true
+        ? bookmark.comicCoverUrl
+        : comic.coverUrl,
+    lastChapterNumber: lastChapterNumber ?? bookmark.lastChapterNumber,
+  );
 }
 
 // ── Shared modern bookmark/history card widget ───────────────────────
@@ -591,174 +661,176 @@ class _BookmarkCardState extends State<_BookmarkCard> {
                     : AppColors.glassBorder,
                 width: 0.9,
               ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: _isHovered ? 0.32 : (AppColors.isDark ? 0.2 : 0.05),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: _isHovered ? 0.32 : (AppColors.isDark ? 0.2 : 0.05),
+                  ),
+                  blurRadius: _isHovered ? 14 : 8,
+                  offset: Offset(0, _isHovered ? 4 : 2),
                 ),
-                blurRadius: _isHovered ? 14 : 8,
-                offset: Offset(0, _isHovered ? 4 : 2),
-              ),
-            ],
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: widget.onTap,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Cover Image with smooth rounded corners & subtle shadow
-                  Container(
-                    width: 68,
-                    height: 94,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.glassBorder, width: 0.8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: ProxiedImage(
-                      imageUrl: bookmark.comicCoverUrl ?? '',
+              ],
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: widget.onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Cover Image with smooth rounded corners & subtle shadow
+                    Container(
                       width: 68,
                       height: 94,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-
-                  // Metadata & Actions
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Title
-                        Text(
-                          bookmark.comicTitle ?? 'Untitled',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                            letterSpacing: -0.2,
-                            height: 1.25,
-                          ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppColors.glassBorder,
+                          width: 0.8,
                         ),
-                        const SizedBox(height: 7),
-
-                        // Progress Tag Pill
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3.5,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
                           ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySurface,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: AppColors.primary.withValues(alpha: 0.18),
-                              width: 0.8,
+                        ],
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: ProxiedImage(
+                        imageUrl: bookmark.comicCoverUrl ?? '',
+                        width: 68,
+                        height: 94,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+
+                    // Metadata & Actions
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Title
+                          Text(
+                            bookmark.comicTitle ?? 'Untitled',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                              letterSpacing: -0.2,
+                              height: 1.25,
                             ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(widget.icon, size: 12, color: widget.iconColor),
-                              const SizedBox(width: 4.5),
-                              Flexible(
-                                child: Text(
-                                  bookmark.progressText,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primaryLight,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
+                          const SizedBox(height: 7),
 
-                        // Continue reading button
-                        if (widget.onContinue != null)
-                          HoverWidget(
-                            scale: 1.06,
-                            onTap: widget.onContinue,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
+                          // Progress Tag Pill
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.primarySurface,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.18,
+                                ),
+                                width: 0.8,
                               ),
-                              decoration: BoxDecoration(
-                                gradient: AppColors.primaryGradient,
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.primary.withValues(alpha: 0.3),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.play_arrow_rounded,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Lanjut Baca',
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  widget.icon,
+                                  size: 12,
+                                  color: widget.iconColor,
+                                ),
+                                const SizedBox(width: 4.5),
+                                Flexible(
+                                  child: Text(
+                                    bookmark.progressText,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: GoogleFonts.plusJakartaSans(
                                       fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.primaryLight,
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           ),
-                      ],
-                    ),
-                  ),
+                          const SizedBox(height: 10),
 
-                  // Actions: 1-Tap Delete Button
-                  HoverWidget(
-                    scale: 1.15,
-                    child: IconButton(
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        color: AppColors.textMuted.withValues(alpha: 0.7),
-                        size: 20,
+                          // Continue reading button
+                          if (widget.onContinue != null)
+                            HoverWidget(
+                              scale: 1.06,
+                              onTap: widget.onContinue,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  gradient: AppColors.primaryGradient,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.play_arrow_rounded,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Lanjut Baca',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      splashRadius: 20,
-                      tooltip: 'Hapus',
-                      onPressed: widget.onDelete,
                     ),
-                  ),
-                ],
+
+                    // Actions: 1-Tap Delete Button
+                    HoverWidget(
+                      scale: 1.15,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.delete_outline_rounded,
+                          color: AppColors.textMuted.withValues(alpha: 0.7),
+                          size: 20,
+                        ),
+                        splashRadius: 20,
+                        tooltip: 'Hapus',
+                        onPressed: widget.onDelete,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
 
 // ── Custom Art-Directed Empty State Widget ─────────────────────────────
@@ -806,11 +878,7 @@ Widget _buildEmptyState(
                     width: 1.5,
                   ),
                 ),
-                child: Icon(
-                  icon,
-                  size: 34,
-                  color: AppColors.primary,
-                ),
+                child: Icon(icon, size: 34, color: AppColors.primary),
               ),
             ],
           ),
@@ -838,7 +906,7 @@ Widget _buildEmptyState(
           const SizedBox(height: 24),
           HoverWidget(
             scale: 1.05,
-            enableGlow: true,
+            enableGlow: false,
             glowColor: AppColors.primary,
             borderRadius: BorderRadius.circular(12),
             child: ElevatedButton.icon(
@@ -850,7 +918,10 @@ Widget _buildEmptyState(
                 foregroundColor: AppColors.background,
                 elevation: 0,
                 shadowColor: Colors.transparent,
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -866,4 +937,3 @@ Widget _buildEmptyState(
     ),
   );
 }
-

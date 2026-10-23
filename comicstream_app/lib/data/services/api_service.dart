@@ -286,14 +286,6 @@ class MangaApiService {
     return total - idx;
   }
 
-  DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    try {
-      return DateTime.parse(v.toString());
-    } catch (_) {
-      return DateTime.now();
-    }
-  }
 }
 
 /// Service untuk mengambil data komik dari Supabase (setelah dipindahkan)
@@ -537,11 +529,17 @@ class SupabaseComicService {
 
   /// Ambil detail komik beserta daftar chapter-nya
   Future<Map<String, dynamic>> getComicDetail(String endpoint) async {
+    // Gunakan maybeSingle() agar komik yang tidak ada di DB mengembalikan null
+    // tanpa melempar PGRST116 exception (yang akan mengisi log dengan noise).
     final comicResponse = await _supabase
         .from('comics')
         .select()
         .eq('id', endpoint)
-        .single();
+        .maybeSingle();
+
+    if (comicResponse == null) {
+      throw Exception('Comic not found in Supabase: $endpoint');
+    }
 
     final comic = Comic.fromSupabase(comicResponse);
 

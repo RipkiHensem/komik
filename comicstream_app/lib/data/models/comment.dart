@@ -8,6 +8,7 @@ class Comment {
   final String? avatarUrl;
   final String content;
   final DateTime createdAt;
+  final bool isSpoiler;
 
   const Comment({
     required this.id,
@@ -18,6 +19,7 @@ class Comment {
     this.avatarUrl,
     required this.content,
     required this.createdAt,
+    this.isSpoiler = false,
   });
 
   factory Comment.fromJson(Map<String, dynamic> json) {
@@ -30,6 +32,7 @@ class Comment {
       avatarUrl: json['avatar_url'] as String?,
       content: json['content'] as String,
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ?? DateTime.now(),
+      isSpoiler: json['is_spoiler'] as bool? ?? false,
     );
   }
 

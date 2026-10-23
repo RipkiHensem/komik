@@ -2,7 +2,7 @@ class AppConstants {
   AppConstants._();
 
   // ── App Info ──────────────────────────────────────────────
-  static const String appName = 'ComicStream';
+  static const String appName = 'Yomu';
   static const String appVersion = '1.0.0';
   static const String appTagline = 'Baca Komik Tanpa Batas';
 

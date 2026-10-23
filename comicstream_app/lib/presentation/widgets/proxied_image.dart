@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
@@ -5,6 +6,8 @@ import '../../core/theme/app_colors.dart';
 
 /// Reusable network image widget that automatically proxies URLs on web
 /// to bypass CORS restrictions from thumbnail.komiku.org.
+/// Gambar di-cache ke disk via [CachedNetworkImage] sehingga tidak di-download
+/// ulang saat chapter dibuka kembali.
 class ProxiedImage extends StatelessWidget {
   final String imageUrl;
   final double? width;
@@ -13,6 +16,10 @@ class ProxiedImage extends StatelessWidget {
   final BorderRadius? borderRadius;
   final Widget? placeholder;
   final Widget? errorWidget;
+  final int? cacheWidth;
+  final int? cacheHeight;
+  final FilterQuality filterQuality;
+  final bool gaplessPlayback;
 
   const ProxiedImage({
     super.key,
@@ -23,6 +30,10 @@ class ProxiedImage extends StatelessWidget {
     this.borderRadius,
     this.placeholder,
     this.errorWidget,
+    this.cacheWidth,
+    this.cacheHeight,
+    this.filterQuality = FilterQuality.medium,
+    this.gaplessPlayback = false,
   });
 
   /// Converts a thumbnail URL to go through our Supabase Edge Function proxy
@@ -55,33 +66,33 @@ class ProxiedImage extends StatelessWidget {
       return _buildPlaceholder();
     }
 
-    Widget image = Image.network(
-      proxiedUrl,
+    // CachedNetworkImage menyimpan gambar ke disk cache sehingga saat chapter
+    // dibuka kembali gambar tidak perlu di-download ulang dari internet.
+    Widget image = CachedNetworkImage(
+      imageUrl: proxiedUrl,
       width: width,
       height: height,
       fit: fit,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
-        return placeholder ??
-            Container(
-              width: width,
-              height: height,
-              color: AppColors.surface,
-              child: Center(
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                            loadingProgress.expectedTotalBytes!
-                      : null,
-                  color: AppColors.primary,
-                ),
+      filterQuality: filterQuality,
+      fadeInDuration: const Duration(milliseconds: 200),
+      fadeOutDuration: const Duration(milliseconds: 100),
+      memCacheWidth: cacheWidth,
+      memCacheHeight: cacheHeight,
+      placeholder: (context, url) =>
+          placeholder ??
+          Container(
+            width: width,
+            height: height,
+            color: AppColors.surface,
+            child: Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primary,
               ),
-            );
-      },
-      errorBuilder: (context, error, stackTrace) {
-        return errorWidget ?? _buildPlaceholder();
-      },
+            ),
+          ),
+      errorWidget: (context, url, error) =>
+          errorWidget ?? _buildPlaceholder(),
     );
 
     if (borderRadius != null) {
@@ -115,7 +126,7 @@ class ProxiedImage extends StatelessWidget {
             if (width == null || width! >= 100) ...[
               const SizedBox(height: 6),
               Text(
-                'ComicStream',
+                'Yomu',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,

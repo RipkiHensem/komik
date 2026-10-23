@@ -49,7 +49,7 @@ class ErrorView extends StatelessWidget {
             if (onRetry != null) ...[
               const SizedBox(height: 20),
               HoverWidget(
-                enableGlow: true,
+                enableGlow: false,
                 glowColor: AppColors.primary,
                 scale: 1.05,
                 borderRadius: BorderRadius.circular(12),
