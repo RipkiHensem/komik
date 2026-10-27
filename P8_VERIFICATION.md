@@ -82,7 +82,7 @@ disingkat/disamarkan dan kode error yang stabil.
 | Build APK debug | Lulus: `flutter build apk --debug --no-pub` → `app-debug.apk` (154,5 MB pada fresh clone). |
 | Run lokal | Lulus terbatas: `flutter run -d web-server --web-port=8088 --no-pub` melalui launcher resmi; HTTP `/` mengembalikan 200 dan `flutter_bootstrap.js`. Ini smoke test server, belum membuktikan seluruh UI/fitur. |
 | Run/install pada Android | Belum ada perangkat Android terhubung pada sesi verifikasi awal; perintah instalasi ada di README. |
-| Pull request dan CI | Branch `codex/p8-verification` sudah dipush; status PR/CI dicatat setelah dibuat. |
+| Pull request dan CI | [PR #1](https://github.com/RipkiHensem/komik/pull/1); workflow menjalankan pemeriksaan dan membuat APK debug. |
 | Deploy produksi | Tidak dilakukan; paket demo adalah APK debug. |
 
 Tidak ada klaim bahwa fitur yang bergantung pada Supabase, kamera, notifikasi,
