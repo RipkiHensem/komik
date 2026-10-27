@@ -156,7 +156,14 @@ class MangaApiService {
         chapterNumber: _parseChapterNumber(json, idx, chapterRaw.length),
         title: chapterTitle,
         pageCount: 0,
-        releasedAt: Chapter.parseDate(json['released_at'] ?? json['date']),
+        releasedAt: Chapter.parseDate(
+          json['released_at'] ??
+              json['release_date'] ??
+              json['chapter_date'] ??
+              json['updated_on'] ??
+              json['updated_at'] ??
+              json['date'],
+        ),
       );
     }).toList();
 
@@ -285,7 +292,6 @@ class MangaApiService {
     if (match != null) return int.tryParse(match.group(1)!) ?? (total - idx);
     return total - idx;
   }
-
 }
 
 /// Service untuk mengambil data komik dari Supabase (setelah dipindahkan)

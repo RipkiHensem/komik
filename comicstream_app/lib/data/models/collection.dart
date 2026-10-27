@@ -31,10 +31,12 @@ class Collection {
       }
     }
     final rawItems = json['collection_items'] as List<dynamic>? ?? [];
+    final rawUsername = json['username'] as String?;
+    final username = rawUsername?.trim();
     return Collection(
       id: json['id'] as String,
       userId: json['user_id'] as String,
-      username: (json['username'] as String?) ?? 'User',
+      username: username == null || username.isEmpty ? 'User' : username,
       userAvatarUrl: json['user_avatar_url'] as String?,
       name: json['name'] as String,
       description: json['description'] as String?,

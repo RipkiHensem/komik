@@ -558,7 +558,7 @@ class ProfileScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Username ini digunakan untuk login dan tampil di profil kamu.',
+                  'Username ini tampil di profil dan koleksi kamu. Login menggunakan email.',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary,

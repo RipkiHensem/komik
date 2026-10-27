@@ -33,11 +33,86 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocus = FocusNode();
   bool _isSendingComment = false;
+  bool _isSavingSynopsis = false;
   String _searchQuery = '';
   bool _isAscending = false;
   bool _isExactMatch = false;
   int _chapterPage = 0;
   static const int _chaptersPerPage = 10;
+
+  bool _isMissingSynopsis(String text) {
+    final value = text.trim();
+    return value.isEmpty ||
+        RegExp(r'^(belum ada isi\.?\s*)+$', caseSensitive: false)
+            .hasMatch(value);
+  }
+
+  Future<void> _editSynopsis(Comic comic) async {
+    final controller = TextEditingController(
+      text: _isMissingSynopsis(comic.synopsis) ? '' : comic.synopsis,
+    );
+    final formKey = GlobalKey<FormState>();
+    try {
+      final edited = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Edit caption komik'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              minLines: 4,
+              maxLines: 8,
+              maxLength: 5000,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Tulis sinopsis atau caption komik',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => (value?.trim().isEmpty ?? true)
+                  ? 'Caption tidak boleh kosong'
+                  : null,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(dialogContext, controller.text.trim());
+                }
+              },
+              child: const Text('Simpan'),
+            ),
+          ],
+        ),
+      );
+      if (edited == null || !mounted) return;
+      setState(() => _isSavingSynopsis = true);
+      try {
+        await ref
+            .read(comicCaptionRepositoryProvider)
+            .saveCaption(widget.comicId, edited);
+        ref.invalidate(comicFromDetailProvider(widget.comicId));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Caption komik berhasil disimpan.')),
+        );
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menyimpan caption: $error')),
+        );
+      } finally {
+        if (mounted) setState(() => _isSavingSynopsis = false);
+      }
+    } finally {
+      controller.dispose();
+    }
+  }
 
   Future<void> _hideComic(Comic comic) async {
     final confirmed = await showDialog<bool>(
@@ -580,16 +655,49 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        comic.synopsis,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondary,
-                          height: 1.6,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _isMissingSynopsis(comic.synopsis)
+                                  ? 'Belum ada sinopsis.'
+                                  : comic.synopsis,
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                height: 1.6,
+                              ),
+                            ),
+                          ),
+                          if (isAdmin)
+                            IconButton(
+                              tooltip: 'Edit caption komik',
+                              onPressed: _isSavingSynopsis
+                                  ? null
+                                  : () => _editSynopsis(comic),
+                              icon: _isSavingSynopsis
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.edit_outlined, size: 20),
+                            ),
+                        ],
                       ),
+                      if (comic.lastUpdatedRelative.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Diperbarui ${comic.lastUpdatedRelative}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1487,6 +1595,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                   isRead: isRead,
                   isNew: isNew,
                   showDelete: isAdmin,
+                  fallbackUpdatedAt: isLatest ? comic.updatedAt : null,
                   onDelete: isAdmin ? () => _hideChapter(chapter) : null,
                   onTap: () {
                     context.push(

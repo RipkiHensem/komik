@@ -96,7 +96,10 @@ class Comic {
       synopsis:
           json['synopsis']?.toString() ?? json['description']?.toString() ?? '',
       updatedAt: Chapter.parseDate(
-        json['updated_on'] ?? json['updated_at'] ?? json['updated_at_text'],
+        json['updated_on'] ??
+            json['updated_at'] ??
+            json['updated_at_text'] ??
+            json['last_update'],
       ),
     );
   }
@@ -135,8 +138,34 @@ class Comic {
       format: format,
       rating: _parseDouble(json['rating'] ?? json['score']),
       chapterCount: _parseInt(json['chapter_count'] ?? json['total_chapter']),
+      updatedAt: Chapter.parseDate(
+        json['updated_on'] ??
+            json['updated_at'] ??
+            json['updated_at_text'] ??
+            json['last_update'],
+      ),
     );
   }
+
+  Comic withSynopsis(String value) => Comic(
+    id: id,
+    title: title,
+    alternativeTitle: alternativeTitle,
+    synopsis: value,
+    coverUrl: coverUrl,
+    genres: genres,
+    status: status,
+    author: author,
+    artist: artist,
+    format: format,
+    rating: rating,
+    viewCount: viewCount,
+    bookmarkCount: bookmarkCount,
+    chapterCount: chapterCount,
+    updatedAt: updatedAt,
+    isPopular: isPopular,
+    isRecommended: isRecommended,
+  );
 
   Map<String, dynamic> toJson() {
     return {

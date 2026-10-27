@@ -23,7 +23,14 @@ class Chapter {
       chapterNumber: _parseInt(json['chapter_number']),
       title: json['title']?.toString(),
       pageCount: _parseInt(json['page_count']),
-      releasedAt: parseDate(json['released_at'] ?? json['date']),
+      releasedAt: parseDate(
+        json['released_at'] ??
+            json['release_date'] ??
+            json['chapter_date'] ??
+            json['updated_on'] ??
+            json['updated_at'] ??
+            json['date'],
+      ),
     );
   }
 
@@ -34,7 +41,7 @@ class Chapter {
       chapterNumber: (json['chapter_number'] as num?)?.toInt() ?? 0,
       title: json['title']?.toString(),
       pageCount: (json['page_count'] as num?)?.toInt() ?? 0,
-      releasedAt: DateTime.tryParse(json['released_at']?.toString() ?? ''),
+      releasedAt: parseDate(json['released_at'] ?? json['updated_at']),
     );
   }
 
@@ -89,8 +96,9 @@ class Chapter {
         return DateTime.now().subtract(duration);
       }
 
-      final dateMatch = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$')
-          .firstMatch(raw);
+      final dateMatch = RegExp(
+        r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$',
+      ).firstMatch(raw);
       if (dateMatch != null) {
         final day = int.parse(dateMatch.group(1)!);
         final month = int.parse(dateMatch.group(2)!);
