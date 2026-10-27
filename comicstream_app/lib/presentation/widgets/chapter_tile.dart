@@ -11,6 +11,7 @@ class ChapterTile extends StatelessWidget {
   final VoidCallback? onTap;
   final bool showDelete;
   final VoidCallback? onDelete;
+  final DateTime? fallbackUpdatedAt;
 
   const ChapterTile({
     super.key,
@@ -21,10 +22,12 @@ class ChapterTile extends StatelessWidget {
     this.onTap,
     this.showDelete = false,
     this.onDelete,
+    this.fallbackUpdatedAt,
   });
 
   @override
   Widget build(BuildContext context) {
+    final relativeTime = chapter.relativeTimeAt(fallbackUpdatedAt);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -97,12 +100,14 @@ class ChapterTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                chapter.relativeTime,
-                maxLines: 1,
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-              const SizedBox(width: 8),
+              if (relativeTime != null) ...[
+                Text(
+                  relativeTime,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (isRead)
                 Icon(Icons.check, size: 18, color: AppColors.textSecondary)
               else

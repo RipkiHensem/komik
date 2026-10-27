@@ -1,5 +1,8 @@
 # comicstream_app
 
+Petunjuk fresh clone, pengujian, build APK, dan pemasangan demo Yomu ada di
+[README utama](../README.md). Jalankan perintah Flutter dari folder ini.
+
 A new Flutter project.
 
 ## Getting Started

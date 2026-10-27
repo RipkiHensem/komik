@@ -21,7 +21,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
@@ -29,7 +29,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   void dispose() {
-    _usernameController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -39,7 +39,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final success = await ref.read(authProvider.notifier).login(
-          _usernameController.text.trim(),
+          _emailController.text.trim(),
           _passwordController.text,
         );
 
@@ -161,7 +161,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    'Masuk dengan username atau email kamu',
+                                    'Masuk dengan email kamu',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       fontSize: 13,
@@ -244,15 +244,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     const SizedBox(height: 18),
                                   ],
 
-                                  // Field Username / Email
+                                  // Field email
                                   TextFormField(
-                                    controller: _usernameController,
+                                    controller: _emailController,
                                     keyboardType: TextInputType.emailAddress,
                                     style:
                                         TextStyle(color: AppColors.textPrimary),
                                     decoration: const InputDecoration(
-                                      hintText: 'Username atau Email kamu',
-                                      prefixIcon: Icon(Icons.person_outline_rounded,
+                                      hintText: 'Alamat email kamu',
+                                      prefixIcon: Icon(Icons.email_outlined,
                                           size: 20),
                                     ),
                                     onChanged: (_) {
@@ -263,7 +263,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     validator: (value) {
                                       if (value == null ||
                                           value.trim().isEmpty) {
-                                        return 'Username atau email tidak boleh kosong';
+                                        return 'Email tidak boleh kosong';
+                                      }
+                                      if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                                          .hasMatch(value.trim())) {
+                                        return 'Masukkan alamat email yang valid';
                                       }
                                       return null;
                                     },

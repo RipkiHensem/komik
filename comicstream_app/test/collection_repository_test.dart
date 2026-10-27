@@ -46,6 +46,17 @@ void main() {
     expect(model.itemCount, 0);
   });
 
+  test('model uses a safe username for empty public profiles', () {
+    expect(
+      Collection.fromJson({...fixture(), 'username': ''}).username,
+      'User',
+    );
+    expect(
+      Collection.fromJson({...fixture(), 'username': '   '}).username,
+      'User',
+    );
+  });
+
   test('model invalid: missing id and blank name are rejected', () {
     expect(
       () => Collection.fromJson(fixture()..remove('id')),

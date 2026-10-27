@@ -11,6 +11,7 @@ import '../models/bookmark.dart';
 import '../models/comment.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../repositories/comic_caption_repository.dart';
 
 // ── Service Providers ───────────────────────────────────────
 
@@ -19,6 +20,9 @@ final mangaApiServiceProvider = Provider<MangaApiService>(
 );
 final supabaseComicServiceProvider = Provider<SupabaseComicService>(
   (ref) => SupabaseComicService(Supabase.instance.client),
+);
+final comicCaptionRepositoryProvider = Provider<ComicCaptionRepository>(
+  (ref) => ComicCaptionRepository(Supabase.instance.client),
 );
 final supabaseAuthServiceProvider = Provider<SupabaseAuthService>(
   (ref) => SupabaseAuthService(),
@@ -69,11 +73,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<bool> login(String username, String password) async {
+  Future<bool> login(String email, String password) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null);
     try {
       final user = await _authService.login(
-        username: username,
+        email: email,
         password: password,
       );
       state = AuthState(status: AuthStatus.authenticated, user: user);
@@ -161,8 +165,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   String _parseError(dynamic e) {
     final msg = e.toString();
-    if (msg.contains('Username') || msg.contains('tidak ditemukan')) {
-      return 'Username atau email tidak ditemukan. Pastikan akun sudah terdaftar atau cek kembali ejaan username.';
+    if (msg.contains('Masukkan alamat email yang valid')) {
+      return 'Masukkan alamat email yang valid.';
     }
     if (msg.contains('Invalid login credentials') ||
         msg.contains('invalid_credentials') ||
@@ -519,7 +523,16 @@ final comicFromDetailProvider = FutureProvider.family<Comic, String>((
   endpoint,
 ) async {
   final detail = await ref.watch(comicDetailProvider(endpoint).future);
-  return detail['comic'] as Comic;
+  final comic = detail['comic'] as Comic;
+  try {
+    final caption = await ref
+        .read(comicCaptionRepositoryProvider)
+        .getCaption(endpoint);
+    return caption == null ? comic : comic.withSynopsis(caption);
+  } catch (error) {
+    debugPrint('[Comic caption] Override unavailable for $endpoint: $error');
+    return comic;
+  }
 });
 
 /// Provider khusus untuk chapters dari detail

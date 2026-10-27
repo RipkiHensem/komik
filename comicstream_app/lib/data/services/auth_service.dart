@@ -63,46 +63,20 @@ class SupabaseAuthService {
     );
   }
 
-  /// Login dengan username ATAU email & password
-  /// - Jika user mengetik email (mengandung @), langsung sign in dengan email.
-  /// - Jika user mengetik username, cari email via RPC get_email_by_username.
+  /// Login dengan email dan password. Username tetap hanya untuk profil.
   Future<app_models.User> login({
-    required String username,
+    required String email,
     required String password,
   }) async {
-    final input = username.trim();
-    String? email;
-
-    // 1. Jika input mengandung '@', user memasukkan email langsung
-    if (input.contains('@')) {
-      email = input;
-    } else {
-      // 2. Cari email berdasarkan username via RPC function di Supabase
-      try {
-        final result = await _client.rpc(
-          'get_email_by_username',
-          params: {'p_username': input},
-        );
-        if (result != null && result is String && result.trim().isNotEmpty) {
-          email = result.trim();
-        }
-      } catch (_) {}
+    final normalizedEmail = email.trim();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+        .hasMatch(normalizedEmail)) {
+      throw const FormatException('Masukkan alamat email yang valid.');
     }
 
-    // 3. Jika belum ditemukan dan input mengandung '@', tetap coba sebagai email
-    if (email == null || email.isEmpty) {
-      if (input.contains('@')) {
-        email = input;
-      } else {
-        throw Exception(
-          'Username atau email tidak ditemukan. Pastikan akun sudah terdaftar atau periksa kembali ejaannya.',
-        );
-      }
-    }
-
-    // 4. Sign in dengan email dan password ke Supabase Auth
+    // Sign in with Supabase Auth; no public username-to-email lookup.
     final response = await _client.auth.signInWithPassword(
-      email: email,
+      email: normalizedEmail,
       password: password,
     );
 
@@ -110,7 +84,7 @@ class SupabaseAuthService {
       throw Exception('Password salah. Silakan coba lagi.');
     }
 
-    // 5. Ambil data profil dari tabel profiles
+    // Ambil data profil dari tabel profiles
     Map<String, dynamic>? profile;
     try {
       profile = await _client
@@ -127,7 +101,7 @@ class SupabaseAuthService {
         ? rawUsername
         : (metaUsername != null && metaUsername.isNotEmpty)
         ? metaUsername
-        : email.split('@').first;
+        : normalizedEmail.split('@').first;
 
     // Jika username di profiles atau metadata belum tersimpan, otomatis simpan
     if (rawUsername == null || rawUsername.isEmpty) {
@@ -145,7 +119,7 @@ class SupabaseAuthService {
 
     return app_models.User.fromSupabase(
       id: response.user!.id,
-      email: email,
+      email: normalizedEmail,
       username: resolvedUsername,
       avatarUrl: profile?['avatar_url'] as String?,
       createdAt: response.user!.createdAt,

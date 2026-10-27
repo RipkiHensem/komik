@@ -610,7 +610,9 @@ class _CollectionCardState extends State<_CollectionCard> {
                                   (c.userAvatarUrl == null ||
                                       c.userAvatarUrl!.isEmpty)
                                   ? Text(
-                                      c.username[0].toUpperCase(),
+                                      c.username.trim().isEmpty
+                                          ? 'U'
+                                          : c.username.trim()[0].toUpperCase(),
                                       style: TextStyle(
                                         fontSize: 9,
                                         color: AppColors.primary,
