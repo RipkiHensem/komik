@@ -8,11 +8,11 @@ menulis data produksi.
 
 | Pemeriksaan | Hasil | Batas bukti / tindak lanjut |
 | --- | --- | --- |
-| Kunci privat di file Git | Tidak ditemukan keystore, `.env`, atau kunci `service_role` yang dilacak Git. Kunci Supabase di aplikasi adalah kunci `anon` publik. | Pemeriksaan statis file yang dilacak; tidak memeriksa riwayat commit lama atau secret di luar repo. |
+| Kunci privat di file Git | `python tools/check_public_repo.py` lulus pada 161 file yang dilacak: tidak ada keystore/`.env`/blok private key, dan JWT kunci aplikasi berperan `anon`. | Pemeriksaan statis file saat ini; tidak memeriksa riwayat commit lama atau secret di luar repo. |
 | Izin koleksi | SQL mengaktifkan RLS; pemilik saja yang dapat mengubah koleksi, item, dan like miliknya. | Sudah diuji pada SQL test P6/P7 sebelumnya; tidak diuji ulang terhadap backend live pada P8. |
 | Izin admin untuk caption | UI membatasi tombol edit ke admin; SQL `comic_synopsis_overrides` membatasi INSERT/UPDATE dengan allowlist `admin_users`. | Perlu menjalankan `supabase_comic_caption_setup.sql` pada proyek Supabase aktif dan menguji admin serta akun biasa. |
 | Distribusi Android | Build release tidak lagi memakai debug signing. | Demo memakai APK debug. Rilis produksi membutuhkan keystore pribadi dan pengujian terpisah. |
-| Login username lama | RPC `SECURITY DEFINER` dapat mengembalikan email dari username kepada `anon`. | Login aplikasi sekarang email saja. Jalankan `supabase_security_p8.sql` pada backend agar RPC lama dihapus; temuan ini belum diuji terhadap backend live. |
+| Login username lama | Review SQL menemukan RPC `SECURITY DEFINER` yang dapat mengembalikan email dari username kepada `anon`. | Login aplikasi sekarang email saja. Jalankan `supabase_security_p8.sql` pada backend agar RPC lama dihapus; temuan ini belum diuji terhadap backend live. |
 | Proxy gambar | Klien dapat mengirim URL ke Edge Function `img-proxy`. | Kode Edge Function tidak ada di repo ini; pembatasan host/SSRF di server belum dapat diverifikasi. |
 | Log kesalahan | Contoh log aman ada di bagian 03. | Sebagian kode debug lama masih mencetak exception mentah; jangan lampirkan log tersebut tanpa redaksi. |
 
@@ -21,6 +21,14 @@ eksploitasi. Strix tidak tersedia di lingkungan kerja ini dan tidak ada
 staging atau akun pengujian terpisah untuk uji serangan aktif. Karena itu,
 temuan RPC username dan proxy gambar adalah risiko yang perlu diverifikasi,
 bukan klaim eksploit berhasil terhadap layanan produksi.
+
+**Tindakan backend yang masih diperlukan:** jalankan
+[`supabase_security_p8.sql`](supabase_security_p8.sql) untuk menghapus RPC lama,
+dan [`supabase_comic_caption_setup.sql`](supabase_comic_caption_setup.sql)
+untuk membuat tabel caption dengan RLS. Kode aplikasi tetap aman dari pemanggilan
+RPC lama meski SQL belum dijalankan, tetapi endpoint lama masih dapat diakses
+oleh klien lain sampai fungsi benar-benar dihapus di backend. Fitur simpan
+caption belum dapat bekerja sebelum tabelnya dibuat.
 
 Perubahan relevan di branch P8: pengaman username kosong di Koleksi Publik,
 caption admin dengan validasi dan RLS terpisah, parsing tanggal update tanpa
@@ -67,13 +75,18 @@ disingkat/disamarkan dan kode error yang stabil.
 
 | Tahap | Status verifikasi |
 | --- | --- |
-| Fresh clone dari GitHub | Akan diisi setelah branch P8 dipush. |
-| Analisis kode | Akan diisi setelah fresh clone. |
-| Semua unit test | Akan diisi setelah fresh clone. |
-| Build APK debug | Akan diisi setelah fresh clone. |
+| Fresh clone dari GitHub | Lulus pada 27 Oktober 2026: `git clone --branch codex/p8-verification --single-branch ...`, lalu `flutter pub get` berhasil. |
+| Pemeriksaan keamanan statis | Lulus: `python tools/check_public_repo.py` pada 161 file Git. |
+| Analisis kode | Lulus: `dart analyze lib test` → `No issues found!`. |
+| Semua unit test | Lulus: `flutter test --no-pub` → `12/12 All tests passed!`. |
+| Build APK debug | Lulus: `flutter build apk --debug --no-pub` → `app-debug.apk` (154,5 MB pada fresh clone). |
+| Run lokal | Lulus terbatas: `flutter run -d web-server --web-port=8088 --no-pub` melalui launcher resmi; HTTP `/` mengembalikan 200 dan `flutter_bootstrap.js`. Ini smoke test server, belum membuktikan seluruh UI/fitur. |
 | Run/install pada Android | Belum ada perangkat Android terhubung pada sesi verifikasi awal; perintah instalasi ada di README. |
-| Pull request dan CI | Akan diisi setelah branch P8 dipush. |
+| Pull request dan CI | Branch `codex/p8-verification` sudah dipush; status PR/CI dicatat setelah dibuat. |
 | Deploy produksi | Tidak dilakukan; paket demo adalah APK debug. |
 
 Tidak ada klaim bahwa fitur yang bergantung pada Supabase, kamera, notifikasi,
 atau instalasi perangkat telah lolos uji fisik hanya dari unit test dan build.
+Saat mencoba menjalankan web-server melalui `flutter_tools.snapshot` langsung,
+launcher internal Flutter mengalami error package config; perintah resmi
+`flutter run` berhasil. Gunakan perintah README, bukan snapshot internal.
