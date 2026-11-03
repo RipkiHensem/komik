@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../repositories/profile_repository.dart';
 import '../models/user.dart' as app_models;
 import '../models/bookmark.dart';
 
@@ -69,8 +70,7 @@ class SupabaseAuthService {
     required String password,
   }) async {
     final normalizedEmail = email.trim();
-    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-        .hasMatch(normalizedEmail)) {
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(normalizedEmail)) {
       throw const FormatException('Masukkan alamat email yang valid.');
     }
 
@@ -195,40 +195,17 @@ class SupabaseAuthService {
     String? username,
     String? avatarUrl,
   }) async {
-    final supaUser = _client.auth.currentUser;
-    if (supaUser == null) throw Exception('Belum login');
-
-    final updates = <String, dynamic>{
-      'id': supaUser.id,
-      'updated_at': DateTime.now().toIso8601String(),
-    };
-    if (username != null && username.trim().isNotEmpty) {
-      updates['username'] = username.trim();
-    }
-    if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
-
-    await _client.from('profiles').upsert(updates);
-
-    if (username != null && username.trim().isNotEmpty) {
-      try {
-        await _client.auth.updateUser(
-          UserAttributes(data: {'username': username.trim()}),
-        );
-      } catch (_) {}
-    }
-
+    await ProfileRepository(
+      _client,
+    ).save(username: username, avatarUrl: avatarUrl);
     return fetchFullProfile();
   }
 
   /// Update avatar URL di tabel profiles
   Future<app_models.User> updateAvatar(String? avatarUrl) async {
-    final supaUser = _client.auth.currentUser;
-    if (supaUser == null) throw Exception('Belum login');
-
-    await _client.from('profiles').upsert({
-      'id': supaUser.id,
-      'avatar_url': avatarUrl,
-    });
+    await ProfileRepository(
+      _client,
+    ).save(avatarUrl: avatarUrl, updateAvatar: true);
 
     final profile = await fetchFullProfile();
     if (profile == null) throw Exception('Sesi berakhir. Silakan masuk lagi.');
