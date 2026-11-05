@@ -1,5 +1,4 @@
-# Yomu (sebelumnya ComicStream)
-
+# Yomu
 ## Mulai dari fresh clone (P8)
 
 Yomu adalah aplikasi Flutter untuk membaca komik. Backend yang dipakai aplikasi
