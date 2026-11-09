@@ -3,14 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../widgets/proxied_image.dart';
+import '../../widgets/comic_cover.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
 import '../../../data/models/comic.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/comment.dart';
 import '../../../data/models/bookmark.dart';
+import '../../../data/services/api_service.dart';
 import '../bookmark/collections_screen.dart';
+import '../admin/admin_comics_screen.dart';
 import '../../widgets/chapter_tile.dart';
 import '../../widgets/genre_chip.dart';
 import '../../widgets/shimmer_loading.dart';
@@ -34,17 +36,140 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
   final FocusNode _commentFocus = FocusNode();
   bool _isSendingComment = false;
   bool _isSavingSynopsis = false;
+  bool _isSavingBookmark = false;
   String _searchQuery = '';
   bool _isAscending = false;
   bool _isExactMatch = false;
   int _chapterPage = 0;
   static const int _chaptersPerPage = 10;
 
+  Future<void> _editMetadata(Comic comic) async {
+    final values = await showComicEditor(context, ref, comic);
+    if (values == null || !mounted) return;
+    await _saveMetadata(
+      () => ref.read(supabaseComicServiceProvider).saveAdminComic(values),
+    );
+  }
+
+  Future<void> _editChapter(Chapter chapter) async {
+    final title = TextEditingController(
+      text: chapter.title ?? chapter.displayName,
+    );
+    final number = TextEditingController(text: '${chapter.chapterNumber}');
+    final date = TextEditingController(
+      text: chapter.releasedAt?.toLocal().toIso8601String() ?? '',
+    );
+    final form = GlobalKey<FormState>();
+    final values = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit chapter'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: title,
+                  maxLength: 250,
+                  decoration: const InputDecoration(labelText: 'Judul chapter'),
+                  validator: (v) =>
+                      (v?.trim().isEmpty ?? true) ? 'Judul wajib diisi' : null,
+                ),
+                TextFormField(
+                  controller: number,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Nomor chapter'),
+                  validator: (v) => (int.tryParse(v ?? '') ?? -1) < 0
+                      ? 'Nomor tidak valid'
+                      : null,
+                ),
+                TextFormField(
+                  controller: date,
+                  decoration: const InputDecoration(
+                    labelText: 'Waktu rilis lokal (opsional)',
+                    hintText: '2026-10-30 19:00',
+                    helperText: 'Kosongkan jika tanggal tidak diketahui',
+                  ),
+                  validator: (v) =>
+                      v!.trim().isNotEmpty &&
+                          DateTime.tryParse(v.trim()) == null
+                      ? 'Gunakan YYYY-MM-DD HH:mm'
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (!form.currentState!.validate()) return;
+              Navigator.pop(dialogContext, <String, dynamic>{
+                'title': title.text.trim(),
+                'chapter_number': int.parse(number.text),
+                'released_at': DateTime.tryParse(
+                  date.text.trim(),
+                )?.toUtc().toIso8601String(),
+              });
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    // Dialog route may still animate out; dispose after that frame sequence.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    title.dispose();
+    number.dispose();
+    date.dispose();
+    if (values == null || !mounted) return;
+    await _saveMetadata(
+      () => ref
+          .read(supabaseComicServiceProvider)
+          .saveChapterMetadata(chapter, values),
+    );
+  }
+
+  Future<void> _saveMetadata(Future<void> Function() save) async {
+    try {
+      await save();
+      ref.invalidate(comicDetailProvider(widget.comicId));
+      ref.invalidate(comicFromDetailProvider(widget.comicId));
+      ref.invalidate(homeComicsProvider);
+      ref.invalidate(popularComicsByFormatProvider);
+      ref.invalidate(searchComicsProvider);
+      ref.invalidate(adminComicsProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Perubahan disimpan.')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Gagal menyimpan. Periksa koneksi, akses admin, dan setup database.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   bool _isMissingSynopsis(String text) {
     final value = text.trim();
     return value.isEmpty ||
-        RegExp(r'^(belum ada isi\.?\s*)+$', caseSensitive: false)
-            .hasMatch(value);
+        RegExp(
+          r'^(belum ada isi\.?\s*)+$',
+          caseSensitive: false,
+        ).hasMatch(value);
   }
 
   Future<void> _editSynopsis(Comic comic) async {
@@ -153,9 +278,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal menghapus komik: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Gagal menghapus komik: $error')));
     }
   }
 
@@ -182,16 +307,17 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
-      await ref.read(supabaseComicServiceProvider).hideAdminChapter(
-            comicId: widget.comicId,
-            chapterId: chapter.id,
-          );
+      await ref
+          .read(supabaseComicServiceProvider)
+          .hideAdminChapter(comicId: widget.comicId, chapterId: chapter.id);
       ref.invalidate(comicDetailProvider(widget.comicId));
       ref.invalidate(comicChaptersProvider(widget.comicId));
       ref.invalidate(homeComicsProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${chapter.displayName} dihapus dari aplikasi.')),
+        SnackBar(
+          content: Text('${chapter.displayName} dihapus dari aplikasi.'),
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -214,7 +340,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     if (cleanQuery.isEmpty) return true;
 
     // Check if query is a chapter number or "chapter X" / "ch X" / "ep X"
-    final regNum = RegExp(r'^(?:chapter\s*|ch\.?\s*|ep\.?\s*|episode\s*)?(\d+)$');
+    final regNum = RegExp(
+      r'^(?:chapter\s*|ch\.?\s*|ep\.?\s*|episode\s*)?(\d+)$',
+    );
     final match = regNum.firstMatch(cleanQuery);
     if (match != null) {
       final targetNum = int.tryParse(match.group(1)!);
@@ -227,7 +355,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     final numStr = ch.chapterNumber.toString();
     if (numStr == cleanQuery) return true;
     if (ch.displayName.toLowerCase() == cleanQuery) return true;
-    if (ch.title != null && ch.title!.trim().toLowerCase() == cleanQuery) return true;
+    if (ch.title != null && ch.title!.trim().toLowerCase() == cleanQuery) {
+      return true;
+    }
 
     return false;
   }
@@ -237,7 +367,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     if (cleanQuery.isEmpty) return true;
 
     // Extract digits if user typed e.g. "chapter 1" or "1"
-    final regNum = RegExp(r'^(?:chapter\s*|ch\.?\s*|ep\.?\s*|episode\s*)?(\d+)$');
+    final regNum = RegExp(
+      r'^(?:chapter\s*|ch\.?\s*|ep\.?\s*|episode\s*)?(\d+)$',
+    );
     final match = regNum.firstMatch(cleanQuery);
     final targetDigits = match != null ? match.group(1)! : cleanQuery;
 
@@ -245,15 +377,6 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     return numStr.contains(targetDigits) ||
         ch.displayName.toLowerCase().contains(cleanQuery) ||
         (ch.title != null && ch.title!.toLowerCase().contains(cleanQuery));
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.invalidate(comicDetailProvider(widget.comicId));
-      ref.invalidate(comicChaptersProvider(widget.comicId));
-    });
   }
 
   @override
@@ -265,7 +388,10 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     super.dispose();
   }
 
-  Future<void> _showSaveToCollectionSheet(BuildContext context, Comic comic) async {
+  Future<void> _showSaveToCollectionSheet(
+    BuildContext context,
+    Comic comic,
+  ) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -276,11 +402,16 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bookmarks = ref.watch(bookmarksProvider);
+    final isBookmarked =
+        bookmarks.valueOrNull?.any((item) => item.comicId == widget.comicId) ??
+        false;
     final comicAsync = ref.watch(comicFromDetailProvider(widget.comicId));
     final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
     final readChapters = ref.watch(readChaptersProvider(widget.comicId));
     final isAdmin = ref.watch(isAdminProvider).valueOrNull == true;
-    final history = ref.watch(historyProvider).valueOrNull ?? const <Bookmark>[];
+    final history =
+        ref.watch(historyProvider).valueOrNull ?? const <Bookmark>[];
     Bookmark? readingProgress;
     for (final entry in history) {
       if (entry.comicId == widget.comicId && entry.lastChapterId != null) {
@@ -290,518 +421,604 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     }
     final continueChapterId = readingProgress?.lastChapterId;
     final hasReadingProgress = continueChapterId != null;
+    final canRead = chaptersAsync.valueOrNull?.isNotEmpty == true;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: comicAsync.when(
         data: (comic) {
           return ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-              child: CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-              // ── Hero Header ───────────────────────────────────
-              SliverAppBar(
-                expandedHeight: 300,
-                pinned: true,
-                backgroundColor: AppColors.background,
-                leading: HoverWidget(
-                  scale: 1.1,
-                  child: IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.arrow_back, size: 20),
-                    ),
-                    onPressed: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go('/home');
-                      }
-                    },
-                  ),
-                ),
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // Blurred background cover
-                      ProxiedImage(
-                        imageUrl: comic.coverUrl,
-                        fit: BoxFit.cover,
-                      ),
-                      // Gradient overlay
-                      Container(
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // ── Hero Header ───────────────────────────────────
+                SliverAppBar(
+                  expandedHeight: 300,
+                  pinned: true,
+                  backgroundColor: AppColors.background,
+                  leading: HoverWidget(
+                    scale: 1.1,
+                    child: IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          gradient: AppColors.heroOverlay,
+                          color: Colors.black.withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
                         ),
+                        child: const Icon(Icons.arrow_back, size: 20),
                       ),
-                      // Content over the hero
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              // Cover thumbnail
-                              Container(
-                                width: 110,
-                                height: 160,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(10),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.5),
-                                      blurRadius: 20,
-                                    ),
-                                  ],
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: ProxiedImage(
-                                  imageUrl: comic.coverUrl,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              // Title & metadata
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      comic.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.textPrimary,
-                                        height: 1.2,
-                                      ),
-                                    ),
-                                    if (comic.alternativeTitle != null) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        comic.alternativeTitle!,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppColors.textMuted,
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 8),
-                                    // Rating & View count chips
-                                    Row(
-                                      children: [
-                                        _statChip(
-                                          Icons.star_rounded,
-                                          comic.rating.toStringAsFixed(1),
-                                          AppColors.warning,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        _statChip(
-                                          Icons.visibility_outlined,
-                                          comic.formattedViews,
-                                          AppColors.textSecondary,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        _statChip(
-                                          Icons.bookmark_outline_rounded,
-                                          comic.formattedBookmarks,
-                                          AppColors.textSecondary,
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/home');
+                        }
+                      },
+                    ),
+                  ),
+                  flexibleSpace: FlexibleSpaceBar(
+                    background: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Blurred background cover
+                        ComicCover(imageUrl: comic.coverUrl),
+                        // Gradient overlay
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: AppColors.heroOverlay,
                           ),
                         ),
-                      ),
-                    ],
+                        // Content over the hero
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // Cover thumbnail
+                                Container(
+                                  width: 110,
+                                  height: 160,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.5,
+                                        ),
+                                        blurRadius: 20,
+                                      ),
+                                    ],
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: ComicCover(imageUrl: comic.coverUrl),
+                                ),
+                                const SizedBox(width: 14),
+                                // Title & metadata
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        comic.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textPrimary,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                                      if (comic.alternativeTitle != null) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          comic.alternativeTitle!,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.textMuted,
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 8),
+                                      // Rating & View count chips
+                                      Row(
+                                        children: [
+                                          _statChip(
+                                            Icons.star_rounded,
+                                            comic.rating.toStringAsFixed(1),
+                                            AppColors.warning,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          _statChip(
+                                            Icons.visibility_outlined,
+                                            comic.formattedViews,
+                                            AppColors.textSecondary,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          _statChip(
+                                            Icons.bookmark_outline_rounded,
+                                            comic.formattedBookmarks,
+                                            AppColors.textSecondary,
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
 
-              // ── Action Buttons (Modern World-Class Island Architecture) ───
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
-                  child: Row(
-                    children: [
-                      // Primary "Mulai Baca" button with gradient and glow
-                      Expanded(
-                        child: HoverWidget(
-                          scale: 1.02,
-                          enableGlow: false,
-                          glowColor: AppColors.primary,
-                          borderRadius: BorderRadius.circular(14),
-                          child: SizedBox(
-                          height: 44,
-                          width: double.infinity,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: AppColors.primaryGradient,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                if (continueChapterId != null) {
-                                  context.push(
-                                    '/comic/${widget.comicId}/chapter/$continueChapterId',
-                                  );
-                                  return;
-                                }
-                                final chapters = ref.read(comicChaptersProvider(widget.comicId));
-                                chapters.whenData((chapterList) {
-                                  if (chapterList.isNotEmpty) {
-                                    final firstChapter = chapterList.reduce(
-                                      (a, b) => a.chapterNumber < b.chapterNumber ? a : b,
-                                    );
-                                    context.push(
-                                      '/comic/${widget.comicId}/chapter/${firstChapter.id}',
-                                    );
-                                  }
-                                });
-                              },
-                              icon: const Icon(Icons.play_arrow_rounded, size: 20, color: Colors.white),
-                              label: Text(
-                                hasReadingProgress ? 'Lanjutkan Baca' : 'Mulai Baca',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.2,
-                                  color: Colors.white,
+                // ── Action Buttons (Modern World-Class Island Architecture) ───
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
+                    child: Row(
+                      children: [
+                        // Primary "Mulai Baca" button with gradient and glow
+                        Expanded(
+                          child: HoverWidget(
+                            scale: 1.02,
+                            enableGlow: false,
+                            glowColor: AppColors.primary,
+                            borderRadius: BorderRadius.circular(14),
+                            child: SizedBox(
+                              height: 44,
+                              width: double.infinity,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: AppColors.primaryGradient,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: ElevatedButton.icon(
+                                  onPressed: !canRead
+                                      ? null
+                                      : () {
+                                          if (continueChapterId != null) {
+                                            context.push(
+                                              '/comic/${widget.comicId}/chapter/$continueChapterId',
+                                            );
+                                            return;
+                                          }
+                                          final chapters = ref.read(
+                                            comicChaptersProvider(
+                                              widget.comicId,
+                                            ),
+                                          );
+                                          chapters.whenData((chapterList) {
+                                            if (chapterList.isNotEmpty) {
+                                              final firstChapter = chapterList
+                                                  .reduce(
+                                                    (a, b) =>
+                                                        a.chapterNumber <
+                                                            b.chapterNumber
+                                                        ? a
+                                                        : b,
+                                                  );
+                                              context.push(
+                                                '/comic/${widget.comicId}/chapter/${firstChapter.id}',
+                                              );
+                                            }
+                                          });
+                                        },
+                                  icon: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                                  label: Text(
+                                    !canRead
+                                        ? 'Belum ada chapter'
+                                        : hasReadingProgress
+                                        ? 'Lanjutkan Baca'
+                                        : 'Mulai Baca',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.2,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    shadowColor: Colors.transparent,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    elevation: 0,
+                                  ),
                                 ),
                               ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.transparent,
-                                shadowColor: Colors.transparent,
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Frosted glass Bookmark button
+                        HoverWidget(
+                          scale: 1.05,
+                          borderRadius: BorderRadius.circular(14),
+                          child: SizedBox(
+                            height: 44,
+                            child: OutlinedButton.icon(
+                              onPressed:
+                                  _isSavingBookmark || bookmarks.isLoading
+                                  ? null
+                                  : () async {
+                                      final isAuth =
+                                          ref.read(authProvider).user != null;
+                                      if (!isAuth) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).hideCurrentSnackBar();
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: const Text(
+                                              'Silakan masuk untuk menyimpan bookmark',
+                                            ),
+                                            duration: const Duration(
+                                              seconds: 4,
+                                            ),
+                                            behavior: SnackBarBehavior.floating,
+                                            action: SnackBarAction(
+                                              label: 'Masuk',
+                                              textColor: AppColors.primary,
+                                              onPressed: () =>
+                                                  context.push('/login'),
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      setState(() => _isSavingBookmark = true);
+                                      try {
+                                        final notifier = ref.read(
+                                          bookmarksProvider.notifier,
+                                        );
+                                        if (isBookmarked) {
+                                          await notifier
+                                              .removeBookmarkByComicId(
+                                                widget.comicId,
+                                              );
+                                        } else {
+                                          await notifier.addBookmark(
+                                            widget.comicId,
+                                            title: comic.title,
+                                            coverUrl: comic.coverUrl,
+                                          );
+                                        }
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(context)
+                                          ..hideCurrentSnackBar()
+                                          ..showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                isBookmarked
+                                                    ? 'Dihapus dari bookmark'
+                                                    : 'Ditambahkan ke bookmark',
+                                              ),
+                                            ),
+                                          );
+                                      } catch (_) {
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Gagal memperbarui bookmark. Periksa koneksi lalu coba lagi.',
+                                            ),
+                                          ),
+                                        );
+                                      } finally {
+                                        if (mounted) {
+                                          setState(
+                                            () => _isSavingBookmark = false,
+                                          );
+                                        }
+                                      }
+                                    },
+                              icon: Icon(
+                                isBookmarked
+                                    ? Icons.bookmark_rounded
+                                    : Icons.bookmark_outline_rounded,
+                                size: 19,
+                                color: isBookmarked
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                              ),
+                              label: Text(
+                                isBookmarked ? 'Tersimpan' : 'Bookmark',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: AppColors.surface,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                ),
+                                side: BorderSide(
+                                  color: AppColors.glassBorder,
+                                  width: 0.8,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
-                                elevation: 0,
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Frosted glass Bookmark button
-                      HoverWidget(
-                        scale: 1.05,
-                        borderRadius: BorderRadius.circular(14),
-                        child: SizedBox(
-                          height: 44,
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              final isAuth = ref.read(authProvider).user != null;
-                              if (!isAuth) {
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text('Silakan masuk untuk menyimpan bookmark'),
-                                    duration: const Duration(seconds: 4),
-                                    behavior: SnackBarBehavior.floating,
-                                    action: SnackBarAction(
-                                      label: 'Masuk',
-                                      textColor: AppColors.primary,
-                                      onPressed: () => context.push('/login'),
-                                    ),
-                                  ),
-                                );
-                                return;
-                              }
-
-                              final isAlreadyBookmarked = ref
-                                  .read(bookmarksProvider.notifier)
-                                  .isBookmarked(widget.comicId);
-
-                              if (isAlreadyBookmarked) {
-                                final bookmarksList =
-                                    ref.read(bookmarksProvider).valueOrNull ?? [];
-                                final existing = bookmarksList.cast<Bookmark?>().firstWhere(
-                                      (b) => b?.comicId == widget.comicId,
-                                      orElse: () => null,
-                                    );
-                                if (existing != null) {
-                                  ref
-                                      .read(bookmarksProvider.notifier)
-                                      .removeBookmarkByComicId(existing.comicId);
-                                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Dihapus dari bookmark'),
-                                      duration: Duration(seconds: 2),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                                }
-                              } else {
-                                ref.read(bookmarksProvider.notifier).addBookmark(widget.comicId);
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Ditambahkan ke bookmark'),
-                                    duration: Duration(seconds: 2),
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
-                              }
-                            },
-                            icon: Icon(
-                              ref.watch(bookmarksProvider.notifier).isBookmarked(widget.comicId)
-                                  ? Icons.bookmark_rounded
-                                  : Icons.bookmark_outline_rounded,
-                              size: 19,
-                              color: ref.watch(bookmarksProvider.notifier).isBookmarked(widget.comicId)
-                                  ? AppColors.primary
-                                  : AppColors.textSecondary,
-                            ),
-                            label: Text(
-                              ref.watch(bookmarksProvider.notifier).isBookmarked(widget.comicId)
-                                  ? 'Tersimpan'
-                                  : 'Bookmark',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.2,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: AppColors.surface,
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
-                              side: BorderSide(color: AppColors.glassBorder, width: 0.8),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      // Tombol Simpan ke Koleksi (icon only)
-                      IconButton(
-                        tooltip: 'Simpan ke Koleksi',
-                        onPressed: () {
-                          final isAuth = ref.read(authProvider).user != null;
-                          if (!isAuth) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text('Masuk untuk menyimpan ke koleksi'),
-                                action: SnackBarAction(
-                                  label: 'Masuk',
-                                  textColor: AppColors.primary,
-                                  onPressed: () => context.push('/login'),
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          _showSaveToCollectionSheet(context, comic);
-                        },
-                        style: IconButton.styleFrom(
-                          minimumSize: const Size(44, 44),
-                          backgroundColor: AppColors.surface,
-                          foregroundColor: AppColors.textPrimary,
-                          side: BorderSide(color: AppColors.glassBorder),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        icon: const Icon(Icons.folder_special_outlined, size: 20),
-                      ),
-                      if (isAdmin) ...[
                         const SizedBox(width: 4),
+                        // Tombol Simpan ke Koleksi (icon only)
                         IconButton(
-                          tooltip: 'Hapus komik dari aplikasi',
-                          onPressed: () => _hideComic(comic),
+                          tooltip: 'Simpan ke Koleksi',
+                          onPressed: () {
+                            final isAuth = ref.read(authProvider).user != null;
+                            if (!isAuth) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text(
+                                    'Masuk untuk menyimpan ke koleksi',
+                                  ),
+                                  action: SnackBarAction(
+                                    label: 'Masuk',
+                                    textColor: AppColors.primary,
+                                    onPressed: () => context.push('/login'),
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            _showSaveToCollectionSheet(context, comic);
+                          },
                           style: IconButton.styleFrom(
                             minimumSize: const Size(44, 44),
                             backgroundColor: AppColors.surface,
+                            foregroundColor: AppColors.textPrimary,
                             side: BorderSide(color: AppColors.glassBorder),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          icon: const Icon(Icons.delete_outline_rounded),
+                          icon: const Icon(
+                            Icons.folder_special_outlined,
+                            size: 20,
+                          ),
                         ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Synopsis ────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _isMissingSynopsis(comic.synopsis)
-                                  ? 'Belum ada sinopsis.'
-                                  : comic.synopsis,
-                              maxLines: 4,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: AppColors.textSecondary,
-                                height: 1.6,
+                        if (isAdmin) ...[
+                          const SizedBox(width: 4),
+                          IconButton(
+                            tooltip: 'Hapus komik dari aplikasi',
+                            onPressed: () => _hideComic(comic),
+                            style: IconButton.styleFrom(
+                              minimumSize: const Size(44, 44),
+                              backgroundColor: AppColors.surface,
+                              side: BorderSide(color: AppColors.glassBorder),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
                               ),
                             ),
+                            icon: const Icon(Icons.delete_outline_rounded),
                           ),
-                          if (isAdmin)
-                            IconButton(
-                              tooltip: 'Edit caption komik',
-                              onPressed: _isSavingSynopsis
-                                  ? null
-                                  : () => _editSynopsis(comic),
-                              icon: _isSavingSynopsis
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.edit_outlined, size: 20),
-                            ),
                         ],
-                      ),
-                      if (comic.lastUpdatedRelative.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Diperbarui ${comic.lastUpdatedRelative}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
                       ],
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Genre Chips (Clickable to Filter by Genre) ───────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: comic.genres.map((genre) {
-                      return GenreChip(
-                        label: genre,
-                        onTap: () {
-                          // Clear search query and select this genre exclusively
-                          ref.read(searchStateProvider.notifier).state = SearchState(
-                            query: '',
-                            selectedGenres: {genre},
-                            sortBy: 'latest',
-                          );
-                          // Route directly to Search Screen showing all comics with this genre
-                          context.go('/search');
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-
-              // ── Metadata ────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Wrap(
-                    spacing: 16,
-                    runSpacing: 8,
-                    children: [
-                      _metaItem('Author', comic.author),
-                      if (comic.artist != null)
-                        _metaItem('Artist', comic.artist!),
-                      _metaItem('Format', comic.format),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Comment Section ──────────────────────────────────
-              SliverToBoxAdapter(
-                child: _buildCommentSection(context),
-              ),
-
-              // ── Divider ─────────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Divider(color: AppColors.divider, height: 1),
-              ),
-
-              // ── Chapters Section (Search, Responsive Grid, 1-10 Pagination) ─
-              ...chaptersAsync.when<List<Widget>>(
-                data: (chapters) =>
-                    _buildChapterSlivers(
-                      context,
-                      comic,
-                      chapters,
-                      readChapters,
-                      isAdmin,
                     ),
-                loading: () => [
+                  ),
+                ),
+
+                // ── Synopsis ────────────────────────────────────────
+                if (isAdmin)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: List.generate(
-                          6,
-                          (index) => const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: ShimmerLoading(height: 56),
-                          ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: OutlinedButton.icon(
+                        onPressed: () => _editMetadata(comic),
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text(
+                          'Edit judul, genre, cover & waktu update',
                         ),
                       ),
                     ),
                   ),
-                ],
-                error: (error, _) => [
-                  SliverToBoxAdapter(
-                    child: ErrorView(
-                      message: 'Gagal memuat chapter',
-                      onRetry: () =>
-                          ref.invalidate(comicChaptersProvider(widget.comicId)),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _isMissingSynopsis(comic.synopsis)
+                                    ? 'Belum ada sinopsis.'
+                                    : comic.synopsis,
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                  height: 1.6,
+                                ),
+                              ),
+                            ),
+                            if (isAdmin)
+                              IconButton(
+                                tooltip: 'Edit caption komik',
+                                onPressed: _isSavingSynopsis
+                                    ? null
+                                    : () => _editSynopsis(comic),
+                                icon: _isSavingSynopsis
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.edit_outlined, size: 20),
+                              ),
+                          ],
+                        ),
+                        if (comic.lastUpdatedRelative.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Diperbarui ${comic.lastUpdatedRelative}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
+                ),
+
+                // ── Genre Chips (Clickable to Filter by Genre) ───────
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: comic.genres.map((genre) {
+                        return GenreChip(
+                          label: genre,
+                          onTap: () {
+                            // Clear search query and select this genre exclusively
+                            ref
+                                .read(searchStateProvider.notifier)
+                                .state = SearchState(
+                              query: '',
+                              selectedGenres: {genre},
+                              selectedFormat: ref.read(exploreFormatProvider),
+                              sortBy: 'latest',
+                            );
+                            // Route directly to Search Screen showing all comics with this genre
+                            context.go('/search');
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+
+                // ── Metadata ────────────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Wrap(
+                      spacing: 16,
+                      runSpacing: 8,
+                      children: [
+                        _metaItem('Author', comic.author),
+                        if (comic.artist != null)
+                          _metaItem('Artist', comic.artist!),
+                        _metaItem('Format', comic.format),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // ── Comment Section ──────────────────────────────────
+                SliverToBoxAdapter(child: _buildCommentSection(context)),
+
+                // ── Divider ─────────────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Divider(color: AppColors.divider, height: 1),
+                ),
+
+                // ── Chapters Section (Search, Responsive Grid, 1-10 Pagination) ─
+                ...chaptersAsync.when<List<Widget>>(
+                  data: (chapters) => _buildChapterSlivers(
+                    context,
+                    comic,
+                    chapters,
+                    readChapters,
+                    isAdmin,
+                  ),
+                  loading: () => [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: List.generate(
+                            6,
+                            (index) => const Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: ShimmerLoading(height: 56),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  error: (error, _) => [
+                    SliverToBoxAdapter(
+                      child: ErrorView(
+                        message: 'Gagal memuat chapter',
+                        onRetry: () =>
+                            ref.invalidate(comicDetailProvider(widget.comicId)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+        loading: () =>
+            Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (error, _) => SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                tooltip: 'Kembali',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () =>
+                    context.canPop() ? context.pop() : context.go('/home'),
+              ),
+              Expanded(
+                child: ErrorView(
+                  message: error is ComicUnavailableException
+                      ? error.toString()
+                      : 'Gagal memuat detail komik. Periksa koneksi dan coba lagi.',
+                  onRetry: () =>
+                      ref.invalidate(comicDetailProvider(widget.comicId)),
+                ),
               ),
             ],
           ),
-          );
-    },
-        loading: () => Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (error, _) => ErrorView(
-          message: 'Gagal memuat detail komik',
-          onRetry: () => ref.invalidate(comicFromDetailProvider(widget.comicId)),
         ),
       ),
     );
@@ -813,10 +1030,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: AppColors.glassBorder,
-          width: 0.6,
-        ),
+        border: Border.all(color: AppColors.glassBorder, width: 0.6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -908,11 +1122,17 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 const SizedBox(width: 8),
                 commentsAsync.when(
                   data: (list) => Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.surface,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.glassBorder, width: 0.6),
+                      border: Border.all(
+                        color: AppColors.glassBorder,
+                        width: 0.6,
+                      ),
                     ),
                     child: Text(
                       '${list.length}',
@@ -950,12 +1170,18 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 CircleAvatar(
                   radius: 16,
                   backgroundColor: AppColors.primarySurface,
-                  backgroundImage: (isLoggedIn && user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
+                  backgroundImage:
+                      (isLoggedIn &&
+                          user.avatarUrl != null &&
+                          user.avatarUrl!.isNotEmpty)
                       ? NetworkImage(user.avatarUrl!)
                       : null,
-                  child: (isLoggedIn && (user.avatarUrl == null || user.avatarUrl!.isEmpty))
+                  child:
+                      (isLoggedIn &&
+                          (user.avatarUrl == null || user.avatarUrl!.isEmpty))
                       ? Text(
-                          (user.username.isNotEmpty ? user.username[0] : '?').toUpperCase(),
+                          (user.username.isNotEmpty ? user.username[0] : '?')
+                              .toUpperCase(),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
@@ -963,8 +1189,12 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                           ),
                         )
                       : (!isLoggedIn
-                          ? Icon(Icons.person, size: 16, color: AppColors.primary)
-                          : null),
+                            ? Icon(
+                                Icons.person,
+                                size: 16,
+                                color: AppColors.primary,
+                              )
+                            : null),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -999,7 +1229,10 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 const SizedBox(width: 8),
                 // Send button
                 AnimatedOpacity(
-                  opacity: isLoggedIn && _commentController.text.trim().isNotEmpty ? 1.0 : 0.35,
+                  opacity:
+                      isLoggedIn && _commentController.text.trim().isNotEmpty
+                      ? 1.0
+                      : 0.35,
                   duration: const Duration(milliseconds: 200),
                   child: GestureDetector(
                     onTap: (isLoggedIn && !_isSendingComment)
@@ -1096,7 +1329,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: comments.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 10),
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final comment = comments[index];
                   final isOwn = user != null && comment.userId == user.id;
@@ -1140,12 +1374,14 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
           CircleAvatar(
             radius: 16,
             backgroundColor: AppColors.primarySurface,
-            backgroundImage: (comment.avatarUrl != null && comment.avatarUrl!.isNotEmpty)
+            backgroundImage:
+                (comment.avatarUrl != null && comment.avatarUrl!.isNotEmpty)
                 ? NetworkImage(comment.avatarUrl!)
                 : null,
             child: (comment.avatarUrl == null || comment.avatarUrl!.isEmpty)
                 ? Text(
-                    (comment.username.isNotEmpty ? comment.username[0] : '?').toUpperCase(),
+                    (comment.username.isNotEmpty ? comment.username[0] : '?')
+                        .toUpperCase(),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1166,13 +1402,18 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
-                        color: isOwn ? AppColors.primary : AppColors.textPrimary,
+                        color: isOwn
+                            ? AppColors.primary
+                            : AppColors.textPrimary,
                       ),
                     ),
                     if (isOwn) ...[
                       const SizedBox(width: 5),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.primarySurface,
                           borderRadius: BorderRadius.circular(4),
@@ -1257,11 +1498,16 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 },
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                   child: Icon(
                     Icons.search_rounded,
                     size: 20,
-                    color: _isExactMatch ? AppColors.primary : AppColors.textMuted,
+                    color: _isExactMatch
+                        ? AppColors.primary
+                        : AppColors.textMuted,
                   ),
                 ),
               ),
@@ -1280,10 +1526,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 onSubmitted: (value) {
                   _submitSearch(value); // Enter key triggers exact match
                 },
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textPrimary,
-                ),
+                style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: 'Cari Chapter, Contoh: 69 atau 76',
                   hintStyle: TextStyle(
@@ -1375,7 +1618,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                     child: Icon(
                       Icons.swap_vert_rounded,
                       size: 20,
-                      color: _isAscending ? AppColors.primary : AppColors.textSecondary,
+                      color: _isAscending
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
                     ),
                   ),
                 ),
@@ -1396,11 +1641,17 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
   ) {
     if (chapters.isEmpty) {
       return [
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: EmptyView(
             title: 'Belum ada chapter',
-            subtitle: 'Chapter akan ditambahkan segera',
+            subtitle: 'Sumber komik belum menyediakan chapter untuk dibaca.',
             icon: Icons.menu_book_rounded,
+            action: TextButton.icon(
+              onPressed: () =>
+                  ref.invalidate(comicDetailProvider(widget.comicId)),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Periksa lagi'),
+            ),
           ),
         ),
       ];
@@ -1431,7 +1682,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     }
 
     final screenWidth = MediaQuery.of(context).size.width;
-    final int crossAxisCount = screenWidth > 900 ? 3 : (screenWidth > 550 ? 2 : 1);
+    final int crossAxisCount = screenWidth > 900
+        ? 3
+        : (screenWidth > 550 ? 2 : 1);
     final pageCount = (filteredChapters.length / _chaptersPerPage).ceil();
     final currentPage = pageCount == 0
         ? 0
@@ -1453,11 +1706,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
           child: Row(
             children: [
-              Icon(
-                Icons.list_rounded,
-                size: 20,
-                color: AppColors.primary,
-              ),
+              Icon(Icons.list_rounded, size: 20, color: AppColors.primary),
               const SizedBox(width: 8),
               Text(
                 'Chapters (${chapters.length})',
@@ -1547,9 +1796,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
       ),
 
       // ── Search Chapter Input Bar ────────────────────────
-      SliverToBoxAdapter(
-        child: _buildSearchBar(),
-      ),
+      SliverToBoxAdapter(child: _buildSearchBar()),
 
       // ── Chapter Grid or Search Empty State ──────────────
       if (filteredChapters.isEmpty)
@@ -1575,37 +1822,36 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
               crossAxisSpacing: 10,
               mainAxisExtent: 62,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final chapter = pageChapters[index];
-                final isLatest = chapter.chapterNumber == maxChapterNumber;
-                final isRead = readChapters.contains(chapter.id);
-                final isNew = isLatest &&
-                    !isRead &&
-                    (comic.status.toLowerCase() == 'ongoing' ||
-                        (chapter.releasedAt != null &&
-                            DateTime.now()
-                                    .difference(chapter.releasedAt!)
-                                    .inDays <=
-                                30));
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final chapter = pageChapters[index];
+              final isLatest = chapter.chapterNumber == maxChapterNumber;
+              final isRead = readChapters.contains(chapter.id);
+              final isNew =
+                  isLatest &&
+                  !isRead &&
+                  (comic.status.toLowerCase() == 'ongoing' ||
+                      (chapter.releasedAt != null &&
+                          DateTime.now()
+                                  .difference(chapter.releasedAt!)
+                                  .inDays <=
+                              30));
 
-                return ChapterTile(
-                  chapter: chapter,
-                  coverUrl: comic.coverUrl,
-                  isRead: isRead,
-                  isNew: isNew,
-                  showDelete: isAdmin,
-                  fallbackUpdatedAt: isLatest ? comic.updatedAt : null,
-                  onDelete: isAdmin ? () => _hideChapter(chapter) : null,
-                  onTap: () {
-                    context.push(
-                      '/comic/${widget.comicId}/chapter/${chapter.id}',
-                    );
-                  },
-                );
-              },
-              childCount: pageChapters.length,
-            ),
+              return ChapterTile(
+                chapter: chapter,
+                coverUrl: comic.coverUrl,
+                isRead: isRead,
+                isNew: isNew,
+                showDelete: isAdmin,
+                fallbackUpdatedAt: isLatest ? comic.updatedAt : null,
+                onDelete: isAdmin ? () => _hideChapter(chapter) : null,
+                onEdit: isAdmin ? () => _editChapter(chapter) : null,
+                onTap: () {
+                  context.push(
+                    '/comic/${widget.comicId}/chapter/${chapter.id}',
+                  );
+                },
+              );
+            }, childCount: pageChapters.length),
           ),
         ),
 
@@ -1618,7 +1864,10 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
               children: [
                 IconButton(
                   tooltip: 'Halaman sebelumnya',
-                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
                   onPressed: currentPage > 0
                       ? () => setState(() => _chapterPage = currentPage - 1)
                       : null,
@@ -1627,12 +1876,18 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 const SizedBox(width: 12),
                 Text(
                   '${currentPage + 1}',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 IconButton(
                   tooltip: 'Halaman berikutnya',
-                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
                   onPressed: currentPage < pageCount - 1
                       ? () => setState(() => _chapterPage = currentPage + 1)
                       : null,
@@ -1820,13 +2075,16 @@ class _SaveToCollectionSheetState
                         return _buildNewCollectionTile(ctx);
                       }
                       final col = collections[index];
-                      final alreadyIn = col.items
-                          .any((i) => i.comicId == widget.comic.id);
+                      final alreadyIn = col.items.any(
+                        (i) => i.comicId == widget.comic.id,
+                      );
                       final isProcessing = _processing.contains(col.id);
 
                       return ListTile(
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 2),
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         leading: Container(
                           width: 48,
                           height: 48,
@@ -1838,13 +2096,15 @@ class _SaveToCollectionSheetState
                           child: col.previewCovers.isNotEmpty
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(9),
-                                  child: ProxiedImage(
+                                  child: ComicCover(
                                     imageUrl: col.previewCovers.first,
-                                    fit: BoxFit.cover,
                                   ),
                                 )
-                              : Icon(Icons.folder_rounded,
-                                  color: AppColors.textMuted, size: 22),
+                              : Icon(
+                                  Icons.folder_rounded,
+                                  color: AppColors.textMuted,
+                                  size: 22,
+                                ),
                         ),
                         title: Text(
                           col.name,
@@ -1865,70 +2125,71 @@ class _SaveToCollectionSheetState
                             ? const SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : alreadyIn
-                                ? Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 5),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      '✓ Tersimpan',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.primary,
-                                      ),
-                                    ),
-                                  )
-                                : ElevatedButton(
-                                    onPressed: () async {
-                                      setState(() =>
-                                          _processing.add(col.id));
-                                      await ref
-                                          .read(myCollectionsProvider
-                                              .notifier)
-                                          .addComic(
-                                            col.id,
-                                            comicId: widget.comic.id,
-                                            comicTitle: widget.comic.title,
-                                            comicCoverUrl:
-                                                widget.comic.coverUrl,
-                                          );
-                                      setState(() =>
-                                          _processing.remove(col.id));
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primary,
-                                      foregroundColor: AppColors.background,
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 14, vertical: 6),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                      ),
-                                      minimumSize: Size.zero,
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: Text(
-                                      'Simpan',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withValues(
+                                    alpha: 0.12,
                                   ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '✓ Tersimpan',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              )
+                            : ElevatedButton(
+                                onPressed: () async {
+                                  setState(() => _processing.add(col.id));
+                                  await ref
+                                      .read(myCollectionsProvider.notifier)
+                                      .addComic(
+                                        col.id,
+                                        comicId: widget.comic.id,
+                                        comicTitle: widget.comic.title,
+                                        comicCoverUrl: widget.comic.coverUrl,
+                                      );
+                                  setState(() => _processing.remove(col.id));
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: AppColors.background,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 6,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: Text(
+                                  'Simpan',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
                       );
                     },
                   );
                 },
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => _buildEmpty(ctx),
               ),
             ),
@@ -1944,8 +2205,11 @@ class _SaveToCollectionSheetState
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.folder_open_rounded,
-              size: 40, color: AppColors.textMuted.withValues(alpha: 0.5)),
+          Icon(
+            Icons.folder_open_rounded,
+            size: 40,
+            color: AppColors.textMuted.withValues(alpha: 0.5),
+          ),
           const SizedBox(height: 12),
           Text(
             'Belum punya koleksi',
@@ -1981,8 +2245,7 @@ class _SaveToCollectionSheetState
         decoration: BoxDecoration(
           color: AppColors.primary.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: AppColors.primary.withValues(alpha: 0.3)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
         ),
         child: Icon(Icons.add_rounded, color: AppColors.primary),
       ),
@@ -2015,10 +2278,13 @@ class _SaveToCollectionSheetState
             borderRadius: BorderRadius.circular(20),
             side: BorderSide(color: AppColors.glassBorder),
           ),
-          title: Text('Buat Koleksi Baru',
-              style: GoogleFonts.plusJakartaSans(
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
+          title: Text(
+            'Buat Koleksi Baru',
+            style: GoogleFonts.plusJakartaSans(
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2030,7 +2296,8 @@ class _SaveToCollectionSheetState
                   labelText: 'Nama Koleksi',
                   labelStyle: TextStyle(color: AppColors.textMuted),
                   border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: AppColors.primary),
@@ -2040,42 +2307,52 @@ class _SaveToCollectionSheetState
               const SizedBox(height: 10),
               GestureDetector(
                 onTap: () => setS(() => isPublic = !isPublic),
-                child: Row(children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(5),
-                      border: Border.all(
+                child: Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(
+                          color: isPublic
+                              ? AppColors.primary
+                              : AppColors.glassBorder,
+                          width: 1.5,
+                        ),
                         color: isPublic
-                            ? AppColors.primary
-                            : AppColors.glassBorder,
-                        width: 1.5,
+                            ? AppColors.primary.withValues(alpha: 0.15)
+                            : Colors.transparent,
                       ),
-                      color: isPublic
-                          ? AppColors.primary.withValues(alpha: 0.15)
-                          : Colors.transparent,
+                      child: isPublic
+                          ? Icon(
+                              Icons.check,
+                              size: 13,
+                              color: AppColors.primary,
+                            )
+                          : null,
                     ),
-                    child: isPublic
-                        ? Icon(Icons.check,
-                            size: 13, color: AppColors.primary)
-                        : null,
-                  ),
-                  const SizedBox(width: 10),
-                  Text('Publik',
+                    const SizedBox(width: 10),
+                    Text(
+                      'Publik',
                       style: GoogleFonts.plusJakartaSans(
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
-                ]),
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
-              child: Text('Batal',
-                  style: TextStyle(color: AppColors.textMuted)),
+              child: Text(
+                'Batal',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -2084,9 +2361,7 @@ class _SaveToCollectionSheetState
                     .read(myCollectionsProvider.notifier)
                     .create(
                       name: nameCtrl.text,
-                      description: descCtrl.text.isEmpty
-                          ? null
-                          : descCtrl.text,
+                      description: descCtrl.text.isEmpty ? null : descCtrl.text,
                       isPublic: isPublic,
                     );
                 if (newCol != null) {
@@ -2104,7 +2379,8 @@ class _SaveToCollectionSheetState
                   ScaffoldMessenger.of(ctx).showSnackBar(
                     SnackBar(
                       content: Text(
-                          'Komik disimpan ke koleksi "${nameCtrl.text}"'),
+                        'Komik disimpan ke koleksi "${nameCtrl.text}"',
+                      ),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
@@ -2114,11 +2390,13 @@ class _SaveToCollectionSheetState
                 backgroundColor: AppColors.primary,
                 foregroundColor: AppColors.background,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-              child: Text('Buat & Simpan',
-                  style: GoogleFonts.plusJakartaSans(
-                      fontWeight: FontWeight.w700)),
+              child: Text(
+                'Buat & Simpan',
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),

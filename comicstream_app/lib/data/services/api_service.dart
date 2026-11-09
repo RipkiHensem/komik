@@ -19,22 +19,40 @@ import '../../core/constants/app_constants.dart';
 /// GET /chapter/{endpoint}       → halaman-halaman chapter
 /// GET /search/{query}           → pencarian manga
 /// GET /genres                   → daftar genre
+class ComicUnavailableException implements Exception {
+  const ComicUnavailableException();
+  @override
+  String toString() =>
+      'Halaman sumber komik belum bisa dibuka. Coba lagi nanti.';
+}
+
+class ChapterSourceException implements Exception {
+  final bool accessDenied;
+  const ChapterSourceException({this.accessDenied = false});
+  @override
+  String toString() => accessDenied
+      ? 'Sumber komik sedang menolak akses ke gambar chapter. Coba lagi nanti.'
+      : 'Gagal menghubungi sumber chapter. Periksa koneksi lalu coba lagi.';
+}
+
 class MangaApiService {
   late final Dio _dio;
 
-  MangaApiService() {
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: AppConstants.mangaApiBaseUrl,
-        connectTimeout: AppConstants.apiTimeout,
-        receiveTimeout: AppConstants.apiTimeout,
-        headers: {
-          'Accept': 'application/json',
-          'apikey': AppConstants.supabaseAnonKey,
-          'Authorization': 'Bearer ${AppConstants.supabaseAnonKey}',
-        },
-      ),
-    );
+  MangaApiService({Dio? client}) {
+    _dio =
+        client ??
+        Dio(
+          BaseOptions(
+            baseUrl: AppConstants.mangaApiBaseUrl,
+            connectTimeout: AppConstants.apiTimeout,
+            receiveTimeout: AppConstants.apiTimeout,
+            headers: {
+              'Accept': 'application/json',
+              'apikey': AppConstants.supabaseAnonKey,
+              'Authorization': 'Bearer ${AppConstants.supabaseAnonKey}',
+            },
+          ),
+        );
 
     if (kDebugMode) {
       _dio.interceptors.add(
@@ -123,10 +141,27 @@ class MangaApiService {
   /// Ambil detail komik beserta daftar chapter-nya
   /// [endpoint] adalah slug/endpoint komik, mis: "solo-leveling"
   Future<Map<String, dynamic>> getComicDetail(String endpoint) async {
-    final response = await _dio.get('/manga/detail/$endpoint');
+    late final Response<dynamic> response;
+    try {
+      response = await _dio.get('/manga/detail/$endpoint');
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      final message = body is Map ? body['message']?.toString() ?? '' : '';
+      if (error.response?.statusCode == 404 ||
+          message.contains('HTTP 404') ||
+          message.contains('HTTP 410')) {
+        throw const ComicUnavailableException();
+      }
+      rethrow;
+    }
     final data = response.data is Map
         ? Map<String, dynamic>.from(response.data as Map)
         : <String, dynamic>{};
+
+    if (data['status'] == false ||
+        (data['title']?.toString().trim().isEmpty ?? true)) {
+      throw const FormatException('Respons detail komik tidak valid.');
+    }
 
     // Parse comic dari Edge Function (format langsung, bukan nested)
     final comic = Comic.fromDetailJson(data);
@@ -191,7 +226,17 @@ class MangaApiService {
   /// Ambil halaman-halaman sebuah chapter
   /// [endpoint] adalah slug/endpoint chapter, mis: "solo-leveling-chapter-1"
   Future<List<ComicPage>> getChapterPages(String endpoint) async {
-    final response = await _dio.get('/chapter/$endpoint');
+    final Response<dynamic> response;
+    try {
+      response = await _dio.get('/chapter/$endpoint');
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      final message = body is Map ? body['message']?.toString() ?? '' : '';
+      throw ChapterSourceException(
+        accessDenied: error.response?.statusCode == 403 ||
+            message.contains('HTTP 403'),
+      );
+    }
     final data = response.data is Map
         ? response.data as Map<String, dynamic>
         : {};
@@ -416,13 +461,45 @@ class SupabaseComicService {
         .whereType<Chapter>()
         .where((chapter) => !hiddenIds.contains(chapter.id))
         .toList();
+    try {
+      final comic = detail['comic'] as Comic;
+      final rows = await _supabase
+          .from('chapter_metadata_overrides')
+          .select()
+          .eq('comic_id', comic.id);
+      final overrides = {for (final row in rows) row['chapter_id']: row};
+      for (var i = 0; i < chapters.length; i++) {
+        final row = overrides[chapters[i].id];
+        if (row != null) {
+          chapters[i] = Chapter.fromJson({
+            ...chapters[i].toJson(),
+            ...row,
+            'id': chapters[i].id,
+          });
+        }
+      }
+      chapters.sort((a, b) => b.chapterNumber.compareTo(a.chapterNumber));
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST205' && error.code != '42P01') rethrow;
+    }
     return {...detail, 'chapters': chapters};
+  }
+
+  Future<void> saveChapterMetadata(
+    Chapter chapter,
+    Map<String, dynamic> values,
+  ) async {
+    await _supabase.from('chapter_metadata_overrides').upsert({
+      'chapter_id': chapter.id,
+      'comic_id': chapter.comicId,
+      ...values,
+    });
   }
 
   Future<void> saveAdminComic(Map<String, dynamic> comic) async {
     await _supabase.from('comics').upsert({
       ...comic,
-      'updated_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
   }
 

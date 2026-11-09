@@ -136,9 +136,9 @@ class Chapter {
     if (diff.isNegative || diff.inSeconds < 60) return 'Baru saja';
     if (diff.inMinutes < 60) return '${diff.inMinutes} menit lalu';
     if (diff.inHours < 24) return '${diff.inHours} jam lalu';
-    if (diff.inDays < 7) return '${diff.inDays} hari lalu';
-    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()} minggu lalu';
-    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()} bulan lalu';
-    return '${(diff.inDays / 365).floor()} tahun lalu';
+    if (diff.inDays < 7) return '${diff.inDays} hr lalu';
+    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()} mgg lalu';
+    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()} bln lalu';
+    return '${(diff.inDays / 365).floor()} thn lalu';
   }
 }

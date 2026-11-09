@@ -8,15 +8,24 @@ import '../models/chapter.dart';
 import '../models/comic_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import '../models/bookmark.dart';
+import '../models/history_identity.dart';
 import '../models/comment.dart';
 import '../services/api_service.dart';
+import '../services/shinigami_api_service.dart';
 import '../services/auth_service.dart';
 import '../repositories/comic_caption_repository.dart';
+import '../repositories/popular_repository.dart';
 
 // ── Service Providers ───────────────────────────────────────
 
 final mangaApiServiceProvider = Provider<MangaApiService>(
   (ref) => MangaApiService(),
+);
+final shinigamiApiServiceProvider = Provider<ShinigamiApiService>(
+  (ref) => ShinigamiApiService(),
+);
+final useShinigamiSourceProvider = Provider<bool>(
+  (ref) => ShinigamiApiService.active,
 );
 final supabaseComicServiceProvider = Provider<SupabaseComicService>(
   (ref) => SupabaseComicService(Supabase.instance.client),
@@ -76,10 +85,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> login(String email, String password) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null);
     try {
-      final user = await _authService.login(
-        email: email,
-        password: password,
-      );
+      final user = await _authService.login(email: email, password: password);
       state = AuthState(status: AuthStatus.authenticated, user: user);
       return true;
     } catch (e) {
@@ -219,14 +225,21 @@ final adminComicsProvider = FutureProvider<List<Comic>>((ref) async {
     throw Exception('Akun ini tidak memiliki akses admin.');
   }
   final db = ref.read(supabaseComicServiceProvider);
-  final api = ref.read(mangaApiServiceProvider);
   final managed = await db.getAdminManagedComics();
   final apiCatalog = <Comic>[];
+  apiCatalog.addAll(
+    await ref.watch(popularComicsByFormatProvider(null).future),
+  );
   try {
-    apiCatalog.addAll(await api.getLatestManga(page: 1));
-    apiCatalog.addAll(await api.getPopularManga(page: 1));
-  } catch (error) {
-    debugPrint('[Admin] API catalog unavailable: $error');
+    if (ref.read(useShinigamiSourceProvider)) {
+      apiCatalog.addAll(await ref.read(shinigamiApiServiceProvider).list());
+    } else {
+      apiCatalog.addAll(
+        await ref.read(mangaApiServiceProvider).getLatestManga(),
+      );
+    }
+  } catch (_) {
+    /* Managed and popular entries remain editable if source fails. */
   }
   final hiddenIds = await db.getHiddenComicIds();
   final managedIds = managed.map((comic) => comic.id).toSet();
@@ -234,7 +247,10 @@ final adminComicsProvider = FutureProvider<List<Comic>>((ref) async {
     ...managed,
     ...apiCatalog.where((comic) => !managedIds.contains(comic.id)),
   ];
-  return all.where((comic) => !hiddenIds.contains(comic.id)).toList();
+  return {
+    for (final comic in all)
+      if (!hiddenIds.contains(comic.id)) comic.id: comic,
+  }.values.toList();
 });
 
 // ── Comics Providers (Supabase) ─────────────────────────────
@@ -264,44 +280,28 @@ final manhuaProvider = FutureProvider<List<Comic>>((ref) async {
   return db.filterHiddenComics(await db.getManhua(page: 1));
 });
 
+final popularRepositoryProvider = Provider<PopularRepository>((ref) {
+  final shinigami = ref.watch(useShinigamiSourceProvider);
+  return PopularRepository(
+    Supabase.instance.client,
+    fallback: (format) => shinigami
+        ? ref.read(shinigamiApiServiceProvider).popular(format: format)
+        : ref.read(mangaApiServiceProvider).getPopularManga(format: format),
+    lookup: (id) => ref.read(comicFromDetailProvider(id).future),
+  );
+});
+final readerIdentityProvider = Provider((ref) => ReaderIdentity());
+final readPopularityTrackerProvider = Provider(
+  (ref) => ReadPopularityTracker(
+    Supabase.instance.client,
+    guestId: ref.read(readerIdentityProvider).getId,
+  ),
+);
 final popularComicsByFormatProvider =
-    FutureProvider.family<List<Comic>, String?>((ref, format) async {
-      final liveApi = ref.read(mangaApiServiceProvider);
-      final dbApi = ref.read(supabaseComicServiceProvider);
-
-      try {
-        List<Comic> list = await liveApi.getPopularManga(
-          page: 1,
-          format: format,
-        );
-        if (format != null) {
-          final f = format.toLowerCase();
-          list = list.where((c) => c.format.toLowerCase() == f).toList();
-        }
-        if (list.isNotEmpty) {
-          return dbApi.mergeAdminComics(
-            list,
-            format: format,
-            popularOnly: true,
-          );
-        }
-      } catch (e) {
-        debugPrint('[Live API Fallback] popularComics: $e');
-      }
-
-      // Fallback to Supabase Database
-      List<Comic> fallback;
-      if (format == 'Manhwa') {
-        fallback = await dbApi.getManhwa(page: 1);
-      } else if (format == 'Manhua') {
-        fallback = await dbApi.getManhua(page: 1);
-      } else if (format == 'Manga') {
-        fallback = await dbApi.getManga(page: 1);
-      } else {
-        fallback = await dbApi.getPopularManga(page: 1);
-      }
-      return dbApi.filterHiddenComics(fallback);
-    });
+    FutureProvider.family<List<Comic>, String?>(
+      (ref, format) =>
+          ref.watch(popularRepositoryProvider).load(format: format),
+    );
 
 // ── Home Comics State with Pagination ────────────────────────
 
@@ -345,10 +345,16 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
   final MangaApiService _liveApi;
   final SupabaseComicService _dbApi;
   final String? _format;
+  final bool _useShinigami;
   bool _isFetching = false;
 
-  HomeComicsNotifier(this._liveApi, this._dbApi, this._format)
-    : super(const HomeComicsState(isLoading: true)) {
+  HomeComicsNotifier(
+    this._liveApi,
+    this._dbApi,
+    this._format, {
+    bool useShinigami = true,
+  }) : _useShinigami = useShinigami,
+       super(const HomeComicsState(isLoading: true)) {
     loadInitial();
   }
 
@@ -358,27 +364,12 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      final page1 = await _fetchFromSources(1);
-      List<Comic> combined = List.from(page1);
-
-      // Fetch page 2 directly on init for rich initial view (20+ comics)
-      if (page1.isNotEmpty) {
-        try {
-          final page2 = await _fetchFromSources(2);
-          final existingIds = page1.map((c) => c.id).toSet();
-          for (final c in page2) {
-            if (!existingIds.contains(c.id)) {
-              combined.add(c);
-            }
-          }
-        } catch (_) {}
-      }
-
+      final batch = await _fetchBatch(const [], 0, 12);
       state = state.copyWith(
-        comics: combined,
-        currentPage: combined.length > page1.length ? 2 : 1,
+        comics: batch.comics,
+        currentPage: batch.page,
         isLoading: false,
-        hasMore: page1.length >= 8,
+        hasMore: batch.hasMore,
       );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -387,7 +378,7 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
     }
   }
 
-  Future<void> loadMore() async {
+  Future<void> loadMore({int? targetCount}) async {
     if (_isFetching ||
         state.isLoading ||
         state.isLoadingMore ||
@@ -398,22 +389,17 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
     state = state.copyWith(isLoadingMore: true);
 
     try {
-      final nextPage = state.currentPage + 1;
-      final newComics = await _fetchFromSources(nextPage);
-      if (newComics.isEmpty) {
-        state = state.copyWith(isLoadingMore: false, hasMore: false);
-      } else {
-        final existingIds = state.comics.map((c) => c.id).toSet();
-        final filteredNew = newComics
-            .where((c) => !existingIds.contains(c.id))
-            .toList();
-        state = state.copyWith(
-          comics: [...state.comics, ...filteredNew],
-          currentPage: nextPage,
-          isLoadingMore: false,
-          hasMore: newComics.length >= 8,
-        );
-      }
+      final batch = await _fetchBatch(
+        state.comics,
+        state.currentPage,
+        targetCount ?? ((state.comics.length ~/ 12) + 1) * 12,
+      );
+      state = state.copyWith(
+        comics: batch.comics,
+        currentPage: batch.page,
+        isLoadingMore: false,
+        hasMore: batch.hasMore,
+      );
     } catch (e) {
       state = state.copyWith(isLoadingMore: false);
     } finally {
@@ -421,7 +407,33 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
     }
   }
 
+  Future<({List<Comic> comics, int page, bool hasMore})> _fetchBatch(
+    List<Comic> existing,
+    int page,
+    int targetCount,
+  ) async {
+    final comics = [...existing];
+    final ids = comics.map((comic) => comic.id).toSet();
+    var hasMore = true;
+    while (comics.length < targetCount && hasMore) {
+      final next = await _fetchFromSources(++page);
+      final additions = next.where((comic) => ids.add(comic.id)).toList();
+      comics.addAll(additions);
+      // A short filtered page is not proof that the source is exhausted.
+      // Stop on an empty/repeated page so a broken source cannot loop forever.
+      hasMore = additions.isNotEmpty;
+    }
+    return (comics: comics, page: page, hasMore: hasMore);
+  }
+
   Future<List<Comic>> _fetchFromSources(int page) async {
+    if (_useShinigami) {
+      final shinigami = await ShinigamiApiService().list(
+        page: page,
+        format: _format,
+      );
+      return _dbApi.filterHiddenComics(shinigami);
+    }
     List<Comic> raw = [];
     bool fromLive = false;
     try {
@@ -464,6 +476,7 @@ final homeComicsProvider =
         ref.read(mangaApiServiceProvider),
         ref.read(supabaseComicServiceProvider),
         format,
+        useShinigami: ref.read(useShinigamiSourceProvider),
       );
     });
 
@@ -477,6 +490,12 @@ final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
   ref,
   endpoint,
 ) async {
+  if (ShinigamiApiService.active && endpoint.startsWith('shngm:')) {
+    return ref.read(shinigamiApiServiceProvider).detail(endpoint);
+  }
+  if (ShinigamiApiService.active && endpoint.startsWith('shngm:')) {
+    return ref.read(shinigamiApiServiceProvider).detail(endpoint);
+  }
   final liveApi = ref.read(mangaApiServiceProvider);
   final dbApi = ref.read(supabaseComicServiceProvider);
 
@@ -497,8 +516,7 @@ final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
 
   try {
     final detail = await liveApi.getComicDetail(endpoint);
-    if (detail.isNotEmpty &&
-        (detail['chapters'] as List?)?.isNotEmpty == true) {
+    if (detail['comic'] is Comic) {
       if (managedDetail != null) {
         return dbApi.filterHiddenChapters({
           ...detail,
@@ -509,6 +527,7 @@ final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
     }
   } catch (e) {
     debugPrint('[Live API Fallback] comicDetail: $e');
+    if (managedDetail == null) rethrow;
   }
 
   if (managedDetail != null) {
@@ -550,17 +569,26 @@ final chapterPagesProvider = FutureProvider.family<List<ComicPage>, String>((
   ref,
   chapterEndpoint,
 ) async {
+  if (ShinigamiApiService.active && chapterEndpoint.startsWith('shngm:')) {
+    return ref.read(shinigamiApiServiceProvider).pages(chapterEndpoint);
+  }
   final liveApi = ref.read(mangaApiServiceProvider);
   final dbApi = ref.read(supabaseComicServiceProvider);
-
+  Object? sourceError;
   try {
     final pages = await liveApi.getChapterPages(chapterEndpoint);
     if (pages.isNotEmpty) return pages;
   } catch (e) {
+    sourceError = e;
     debugPrint('[Live API Fallback] chapterPages: $e');
   }
-
-  return dbApi.getChapterPages(chapterEndpoint);
+  try {
+    final backup = await dbApi.getChapterPages(chapterEndpoint);
+    if (backup.isNotEmpty || sourceError == null) return backup;
+  } catch (_) {
+    if (sourceError == null) rethrow;
+  }
+  throw sourceError;
 });
 
 // ── Bookmarks Provider (Supabase) ────────────────────────────
@@ -568,6 +596,7 @@ final chapterPagesProvider = FutureProvider.family<List<ComicPage>, String>((
 class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
   final SupabaseAuthService _authService;
   final bool _isAuthenticated;
+  int _loadVersion = 0;
 
   BookmarksNotifier(this._authService, this._isAuthenticated)
     : super(const AsyncValue.loading()) {
@@ -583,12 +612,17 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
       state = const AsyncValue.data([]);
       return;
     }
+    final version = ++_loadVersion;
     state = const AsyncValue.loading();
     try {
       final bookmarks = await _authService.getMyBookmarks();
-      state = AsyncValue.data(bookmarks);
+      if (mounted && version == _loadVersion) {
+        state = AsyncValue.data(bookmarks);
+      }
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (mounted && version == _loadVersion) {
+        state = AsyncValue.error(e, st);
+      }
     }
   }
 
@@ -597,15 +631,18 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     String? title,
     String? coverUrl,
   }) async {
-    if (!_isAuthenticated) return;
-    try {
-      await _authService.saveBookmark(
-        comicId: comicId,
-        comicTitle: title,
-        comicCoverUrl: coverUrl,
-      );
-      await loadBookmarks();
-    } catch (_) {}
+    if (!_isAuthenticated) throw Exception('Masuk untuk menyimpan bookmark');
+    final bookmark = await _authService.saveBookmark(
+      comicId: comicId,
+      comicTitle: title,
+      comicCoverUrl: coverUrl,
+    );
+    if (!mounted) return;
+    _loadVersion++;
+    state = AsyncValue.data([
+      bookmark,
+      ...?state.valueOrNull?.where((item) => item.comicId != comicId),
+    ]);
   }
 
   Future<void> updateProgress(
@@ -628,11 +665,13 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
   }
 
   Future<void> removeBookmarkByComicId(String comicId) async {
-    if (!_isAuthenticated) return;
-    try {
-      await _authService.deleteBookmarkByComicId(comicId);
-      await loadBookmarks();
-    } catch (_) {}
+    if (!_isAuthenticated) throw Exception('Masuk untuk menghapus bookmark');
+    await _authService.deleteBookmarkByComicId(comicId);
+    if (!mounted) return;
+    _loadVersion++;
+    state = AsyncValue.data([
+      ...?state.valueOrNull?.where((item) => item.comicId != comicId),
+    ]);
   }
 
   bool isBookmarked(String comicId) {
@@ -645,12 +684,12 @@ class BookmarksNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
 
 final bookmarksProvider =
     StateNotifierProvider<BookmarksNotifier, AsyncValue<List<Bookmark>>>((ref) {
-      // Gunakan ref.read agar BookmarksNotifier tidak dibuat ulang setiap kali
-      // authProvider berubah state (mis. setelah recordProgress). Pembuatan ulang
-      // notifier ini dapat menyebabkan reader comic refresh dan reset.
-      final authState = ref.read(authProvider);
-      final isAuth = authState.status == AuthStatus.authenticated;
-      return BookmarksNotifier(ref.read(supabaseAuthServiceProvider), isAuth);
+      // Recreate only when the account changes, not on profile/progress updates.
+      final userId = ref.watch(authProvider.select((state) => state.user?.id));
+      return BookmarksNotifier(
+        ref.read(supabaseAuthServiceProvider),
+        userId != null,
+      );
     });
 
 // ── History Provider (Supabase) ───────────────────────────────
@@ -658,9 +697,14 @@ final bookmarksProvider =
 class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
   final SupabaseAuthService _authService;
   final bool _isAuthenticated;
+  final Future<List<Chapter>> Function(String)? _loadChapters;
 
-  HistoryNotifier(this._authService, this._isAuthenticated)
-    : super(const AsyncValue.loading()) {
+  HistoryNotifier(
+    this._authService,
+    this._isAuthenticated, {
+    Future<List<Chapter>> Function(String)? loadChapters,
+  }) : _loadChapters = loadChapters,
+       super(const AsyncValue.loading()) {
     if (_isAuthenticated) {
       loadHistory();
     } else {
@@ -675,10 +719,10 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     }
     state = const AsyncValue.loading();
     try {
-      final history = await _authService.getMyHistory();
-      state = AsyncValue.data(history);
+      final history = await _resolvedHistory();
+      if (mounted) state = AsyncValue.data(history);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (mounted) state = AsyncValue.error(e, st);
     }
   }
 
@@ -688,6 +732,26 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
       await _authService.deleteHistory(historyId);
       await loadHistory();
     } catch (_) {}
+  }
+
+  Future<List<Bookmark>> _resolvedHistory() async {
+    final history = HistoryIdentity.merge(await _authService.getMyHistory());
+    return Future.wait(
+      history.map((item) async {
+        if (item.chapterLabel != null || _loadChapters == null) return item;
+        try {
+          final chapters = await _loadChapters(item.comicId);
+          for (final chapter in chapters) {
+            if (chapter.id == item.lastChapterId) {
+              return item.withChapterNumber(chapter.chapterNumber);
+            }
+          }
+        } catch (_) {
+          // Preserve the history entry if its source is unavailable.
+        }
+        return item;
+      }),
+    );
   }
 
   Future<void> clearAll() async {
@@ -717,43 +781,21 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
         comicTitle: comicTitle,
         comicCoverUrl: comicCoverUrl,
       );
-      final history = await _authService.getMyHistory();
-      state = AsyncValue.data(history);
+      final history = await _resolvedHistory();
+      if (mounted) state = AsyncValue.data(history);
     } catch (_) {}
   }
 }
 
 final historyProvider =
     StateNotifierProvider<HistoryNotifier, AsyncValue<List<Bookmark>>>((ref) {
-      // Gunakan ref.read agar HistoryNotifier tidak dibuat ulang setiap kali
-      // authProvider berubah state (mis. setelah recordProgress selesai).
-      // Pembuatan ulang notifier di sini menyebabkan reader comic refresh dan
-      // chapter list di-reset secara bertahap.
-      final authState = ref.read(authProvider);
-      final isAuth = authState.status == AuthStatus.authenticated;
-      final notifier = HistoryNotifier(
+      final userId = ref.watch(authProvider.select((state) => state.user?.id));
+      return HistoryNotifier(
         ref.read(supabaseAuthServiceProvider),
-        isAuth,
+        userId != null,
+        loadChapters: (id) => ref.read(comicChaptersProvider(id).future),
       );
-
-      // Pantau perubahan status auth: jika user login ulang, muat ulang history
-      // agar data tidak tertunda / kosong setelah re-login.
-      ref.listen<AuthState>(authProvider, (previous, next) {
-        final wasAuth = previous?.status == AuthStatus.authenticated;
-        final nowAuth = next.status == AuthStatus.authenticated;
-        if (!wasAuth && nowAuth) {
-          // User baru saja login → reload history segera
-          notifier.loadHistory();
-        } else if (wasAuth && !nowAuth) {
-          // User logout → kosongkan history
-          notifier.clearAll();
-        }
-      });
-
-      return notifier;
     });
-
-// ── Read Chapters Provider ────────────────────────────────────
 
 class ReadChaptersNotifier extends StateNotifier<Set<String>> {
   final SupabaseAuthService _authService;
@@ -823,6 +865,9 @@ final readChaptersProvider =
 
 // ── Search State ─────────────────────────────────────────────
 
+const _unchangedSearchValue = Object();
+final exploreFormatProvider = StateProvider<String?>((ref) => null);
+
 class SearchState {
   final String query;
   final Set<String> selectedGenres;
@@ -843,20 +888,35 @@ class SearchState {
   SearchState copyWith({
     String? query,
     Set<String>? selectedGenres,
-    String? selectedFormat,
-    String? selectedStatus,
+    Object? selectedFormat = _unchangedSearchValue,
+    Object? selectedStatus = _unchangedSearchValue,
     String? sortBy,
     int? page,
-  }) {
-    return SearchState(
-      query: query ?? this.query,
-      selectedGenres: selectedGenres ?? this.selectedGenres,
-      selectedFormat: selectedFormat ?? this.selectedFormat,
-      selectedStatus: selectedStatus ?? this.selectedStatus,
-      sortBy: sortBy ?? this.sortBy,
-      page: page ?? this.page,
-    );
-  }
+  }) => SearchState(
+    query: query ?? this.query,
+    selectedGenres: selectedGenres ?? this.selectedGenres,
+    selectedFormat: identical(selectedFormat, _unchangedSearchValue)
+        ? this.selectedFormat
+        : selectedFormat as String?,
+    selectedStatus: identical(selectedStatus, _unchangedSearchValue)
+        ? this.selectedStatus
+        : selectedStatus as String?,
+    sortBy: sortBy ?? this.sortBy,
+    page: page ?? this.page,
+  );
+
+  bool matches(Comic comic) =>
+      (selectedFormat == null ||
+          comic.format.toLowerCase() == selectedFormat!.toLowerCase()) &&
+      selectedGenres.every(
+        (genre) => comic.genres.any(
+          (value) =>
+              ShinigamiApiService.genreSlug(value) ==
+              ShinigamiApiService.genreSlug(genre),
+        ),
+      ) &&
+      (selectedStatus == null ||
+          comic.status.toLowerCase() == selectedStatus!.toLowerCase());
 
   bool get hasActiveFilters =>
       query.isNotEmpty ||
@@ -893,6 +953,27 @@ final searchComicsProvider = FutureProvider<List<Comic>>((ref) async {
   final api = ref.read(supabaseComicServiceProvider);
   final liveApi = ref.read(mangaApiServiceProvider);
   List<Comic> list;
+
+  if (ShinigamiApiService.active) {
+    list = searchState.query.trim().isNotEmpty
+        ? await ref
+              .read(shinigamiApiServiceProvider)
+              .search(
+                searchState.query.trim(),
+                page: searchState.page,
+                format: searchState.selectedFormat,
+                genres: searchState.selectedGenres,
+              )
+        : await ref
+              .read(shinigamiApiServiceProvider)
+              .list(
+                page: searchState.page,
+                sort: searchState.sortBy == 'popular' ? 'popularity' : 'latest',
+                format: searchState.selectedFormat,
+                genres: searchState.selectedGenres,
+              );
+    return api.filterHiddenComics(list.where(searchState.matches).toList());
+  }
 
   if (searchState.query.trim().isNotEmpty) {
     try {
@@ -999,133 +1080,147 @@ class BrowseState {
 class BrowseNotifier extends StateNotifier<BrowseState> {
   final MangaApiService _liveApi;
   final SupabaseComicService _dbApi;
-  String? _format;
-  String _sortBy = 'latest';
-  bool _isFetching = false;
+  final ShinigamiApiService? _shinigami;
+  SearchState _filter = const SearchState();
+  int _generation = 0;
 
-  BrowseNotifier(this._liveApi, this._dbApi) : super(const BrowseState());
+  BrowseNotifier(this._liveApi, this._dbApi, {ShinigamiApiService? shinigami})
+    : _shinigami = shinigami,
+      super(const BrowseState());
 
-  /// Reset dan mulai dari halaman 1 (dipanggil saat filter berubah)
-  Future<void> init({String? format, String sortBy = 'latest'}) async {
-    if (_isFetching) return;
-    _format = format;
-    _sortBy = sortBy;
-    state = const BrowseState(isLoading: true, hasMore: true);
-    await _fetchPage(1);
+  Future<void> init({
+    String? format,
+    String sortBy = 'latest',
+    Set<String> genres = const {},
+    String? status,
+    String query = '',
+  }) async {
+    _filter = SearchState(
+      selectedFormat: format,
+      sortBy: sortBy,
+      selectedGenres: Set.unmodifiable(genres),
+      selectedStatus: status,
+      query: query,
+    );
+    final generation = ++_generation;
+    state = const BrowseState();
+    await _fetchPage(1, generation, _filter);
   }
 
-  /// Muat halaman berikutnya (dipanggil saat scroll ke bawah)
   Future<void> loadMore() async {
-    if (_isFetching || state.isLoading || !state.hasMore) return;
-    await _fetchPage(state.currentPage + 1);
+    if (state.isLoading || !state.hasMore) return;
+    await _fetchPage(state.currentPage + 1, _generation, _filter);
   }
 
-  Future<void> _fetchPage(int page) async {
-    if (_isFetching) return;
-    _isFetching = true;
-    state = state.copyWith(isLoading: true, error: null);
-
+  Future<ComicCatalogPage> _sourcePage(int page, SearchState filter) async {
+    if (_shinigami != null) {
+      return _shinigami.catalogPage(
+        page: page,
+        format: filter.selectedFormat,
+        genres: filter.selectedGenres,
+        query: filter.query,
+        sort: filter.sortBy == 'popular' ? 'popularity' : 'latest',
+      );
+    }
+    List<Comic> comics;
     try {
-      List<Comic> rawComics = [];
-      bool fromLive = false;
-
-      // 1. Coba live API (Edge Function → scrape komiku.org)
-      try {
-        if (_sortBy == 'popular') {
-          rawComics = await _liveApi.getPopularManga(
-            page: page,
-            format: _format,
-          );
-        } else {
-          rawComics = await _liveApi.getLatestManga(
-            page: page,
-            format: _format,
-          );
-        }
-        fromLive = true;
-        debugPrint(
-          '[Browse] Live API page $page: ${rawComics.length} raw ($_format/$_sortBy)',
+      if (filter.query.isNotEmpty) {
+        comics = page == 1 ? await _liveApi.search(filter.query) : [];
+      } else if (filter.selectedGenres.isNotEmpty) {
+        comics = await _liveApi.getByGenre(
+          ShinigamiApiService.genreSlug(filter.selectedGenres.first),
+          page: page,
         );
-      } catch (e) {
-        debugPrint('[Browse] Live API error: $e — fallback ke Supabase');
-      }
-
-      // 2. Fallback ke Supabase DB
-      if (!fromLive || rawComics.isEmpty) {
-        if (_format == 'Manhwa') {
-          rawComics = await _dbApi.getManhwa(page: page);
-        } else if (_format == 'Manhua') {
-          rawComics = await _dbApi.getManhua(page: page);
-        } else if (_format == 'Manga') {
-          rawComics = await _dbApi.getManga(page: page);
-        } else if (_sortBy == 'popular') {
-          rawComics = await _dbApi.getPopularManga(page: page);
-        } else {
-          rawComics = await _dbApi.getLatestManga(page: page);
-        }
-        debugPrint('[Browse] Supabase page $page: ${rawComics.length} raw');
-      } else if (page == 1) {
-        rawComics = await _dbApi.mergeAdminComics(
-          rawComics,
-          format: _format,
-          popularOnly: _sortBy == 'popular',
-        );
-      }
-
-      // ── Filter ketat berdasarkan format yang dipilih ───────
-      // Ini memastikan tidak ada campur antar negara
-      rawComics = await _dbApi.filterHiddenComics(rawComics);
-      final List<Comic> newComics;
-      final int rawCount = rawComics.length;
-      if (_format != null) {
-        final f = _format!.toLowerCase();
-        newComics = rawComics
-            .where((c) => c.format.toLowerCase() == f)
-            .toList();
-        debugPrint(
-          '[Browse] Setelah filter "$_format": ${newComics.length}/$rawCount komik',
+      } else if (filter.sortBy == 'popular') {
+        comics = await _liveApi.getPopularManga(
+          page: page,
+          format: filter.selectedFormat,
         );
       } else {
-        newComics = rawComics;
+        comics = await _liveApi.getLatestManga(
+          page: page,
+          format: filter.selectedFormat,
+        );
       }
+    } catch (_) {
+      if (filter.query.isNotEmpty) {
+        comics = page == 1 ? await _dbApi.search(filter.query) : [];
+      } else if (filter.selectedGenres.isNotEmpty) {
+        comics = await _dbApi.getByGenre(
+          filter.selectedGenres.first,
+          page: page,
+        );
+      } else {
+        comics = await _dbApi.getLatestManga(page: page);
+      }
+    }
+    return ComicCatalogPage(
+      comics,
+      hasMore: filter.query.isEmpty && comics.length >= 8,
+    );
+  }
 
-      final existing = page == 1 ? <Comic>[] : List<Comic>.from(state.comics);
-      final all = [...existing, ...newComics];
-
-      // hasMore: gunakan rawCount (sebelum filter) untuk menentukan apakah
-      // masih ada halaman berikutnya di sumber data
-      final bool hasMore = rawCount >= 8;
-
-      state = state.copyWith(
-        comics: all,
-        currentPage: page,
-        isLoading: false,
+  Future<void> _fetchPage(int page, int generation, SearchState filter) async {
+    state = state.copyWith(isLoading: true);
+    final collected = <Comic>[];
+    var lastPage = page - 1;
+    var hasMore = true;
+    try {
+      // Bound extra requests when hidden items or combined filters leave a page sparse.
+      for (var attempt = 0; attempt < 4; attempt++) {
+        final result = await _sourcePage(lastPage + 1, filter);
+        if (!mounted || generation != _generation) return;
+        var items = result.comics;
+        if (lastPage == 0) {
+          items = await _dbApi.mergeAdminComics(
+            items,
+            format: filter.selectedFormat,
+            genres: filter.selectedGenres.toList(),
+            popularOnly: filter.sortBy == 'popular',
+            searchQuery: filter.query.isEmpty ? null : filter.query,
+          );
+        }
+        items = await _dbApi.filterHiddenComics(items);
+        if (!mounted || generation != _generation) return;
+        collected.addAll(items.where(filter.matches));
+        lastPage++;
+        hasMore = result.hasMore;
+        if (!hasMore || collected.length >= 12) break;
+      }
+      final byId = {
+        for (final comic in [...state.comics, ...collected]) comic.id: comic,
+      };
+      final comics = byId.values.toList();
+      if (filter.sortBy == 'title') {
+        comics.sort((a, b) => a.title.compareTo(b.title));
+      }
+      if (filter.sortBy == 'rating') {
+        comics.sort((a, b) => b.rating.compareTo(a.rating));
+      }
+      state = BrowseState(
+        comics: comics,
+        currentPage: lastPage,
         hasMore: hasMore,
       );
-
-      // Auto-fetch halaman berikutnya jika hasil filter terlalu sedikit
-      // (misalnya halaman berisi 20 komik tapi setelah filter hanya dapat 2)
-      if (hasMore && newComics.length < 5 && _format != null) {
-        _isFetching = false;
-        await _fetchPage(page + 1);
-        return;
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'Gagal memuat komik. Coba lagi.',
+        );
       }
-    } catch (e, st) {
-      debugPrint('[Browse] Error: $e\n$st');
-      state = state.copyWith(isLoading: false, error: e.toString());
-    } finally {
-      _isFetching = false;
     }
   }
 }
 
 final browseComicsProvider = StateNotifierProvider<BrowseNotifier, BrowseState>(
-  (ref) {
-    return BrowseNotifier(
-      ref.read(mangaApiServiceProvider),
-      ref.read(supabaseComicServiceProvider),
-    );
-  },
+  (ref) => BrowseNotifier(
+    ref.read(mangaApiServiceProvider),
+    ref.read(supabaseComicServiceProvider),
+    shinigami: ref.watch(useShinigamiSourceProvider)
+        ? ref.read(shinigamiApiServiceProvider)
+        : null,
+  ),
 );
 
 // ── UI States ────────────────────────────────────────────────

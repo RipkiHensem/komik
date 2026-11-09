@@ -84,10 +84,7 @@ class AdminComicsScreen extends ConsumerWidget {
     WidgetRef ref,
     Comic? comic,
   ) async {
-    final values = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => ComicEditorDialog(comic: comic),
-    );
+    final values = await showComicEditor(context, ref, comic);
     if (values == null) return;
 
     try {
@@ -279,10 +276,9 @@ class _AdminChaptersDialogState extends ConsumerState<AdminChaptersDialog> {
     if (confirmed != true || !mounted) return;
 
     try {
-      await ref.read(supabaseComicServiceProvider).hideAdminChapter(
-            comicId: widget.comic.id,
-            chapterId: chapter.id,
-          );
+      await ref
+          .read(supabaseComicServiceProvider)
+          .hideAdminChapter(comicId: widget.comic.id, chapterId: chapter.id);
       if (!mounted) return;
       setState(() => _chapters = _loadChapters());
       ScaffoldMessenger.of(context).showSnackBar(
@@ -314,7 +310,9 @@ class _AdminChaptersDialogState extends ConsumerState<AdminChaptersDialog> {
               return const Center(child: CircularProgressIndicator());
             }
             if (snapshot.hasError) {
-              return Center(child: Text('Gagal memuat chapter: ${snapshot.error}'));
+              return Center(
+                child: Text('Gagal memuat chapter: ${snapshot.error}'),
+              );
             }
             final chapters = snapshot.data ?? const <Chapter>[];
             if (chapters.isEmpty) {
@@ -375,8 +373,42 @@ class _MessageView extends StatelessWidget {
   );
 }
 
+Future<Map<String, dynamic>?> showComicEditor(
+  BuildContext context,
+  WidgetRef ref,
+  Comic? comic,
+) async {
+  bool? selected;
+  if (comic != null) {
+    try {
+      final lists = await Future.wait([
+        ref.read(popularComicsByFormatProvider(null).future),
+        ref.read(popularComicsByFormatProvider(comic.format).future),
+      ]);
+      selected = lists
+          .expand((list) => list)
+          .any((item) => item.id == comic.id);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal memeriksa daftar populer. Coba lagi.'),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+  if (!context.mounted) return null;
+  return showDialog<Map<String, dynamic>>(
+    context: context,
+    builder: (_) => ComicEditorDialog(comic: comic, initialPopular: selected),
+  );
+}
+
 class ComicEditorDialog extends StatefulWidget {
-  const ComicEditorDialog({super.key, this.comic});
+  const ComicEditorDialog({super.key, this.comic, this.initialPopular});
+  final bool? initialPopular;
   final Comic? comic;
 
   @override
@@ -393,9 +425,12 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
   late final TextEditingController _artist;
   late final TextEditingController _genres;
   late final TextEditingController _chapters;
+  late final TextEditingController _updatedAt;
   late String _format;
   late String _status;
   bool _popular = false;
+  bool _popularChanged = false;
+  bool _automaticPopular = false;
   bool _recommended = false;
 
   @override
@@ -410,9 +445,19 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
     _artist = TextEditingController(text: comic?.artist ?? '');
     _genres = TextEditingController(text: comic?.genres.join(', ') ?? '');
     _chapters = TextEditingController(text: '${comic?.chapterCount ?? 0}');
-    _format = comic?.format ?? 'Manhwa';
-    _status = comic?.status ?? 'Ongoing';
-    _popular = comic?.isPopular ?? false;
+    _updatedAt = TextEditingController(
+      text: comic?.updatedAt?.toLocal().toIso8601String() ?? '',
+    );
+    _format = const ['Manhwa', 'Manga', 'Manhua'].contains(comic?.format)
+        ? comic!.format
+        : 'Manhwa';
+    _status = switch (comic?.status.trim().toLowerCase()) {
+      null || 'ongoing' || 'berjalan' => 'Ongoing',
+      'completed' || 'tamat' || 'selesai' => 'Completed',
+      'hiatus' => 'Hiatus',
+      _ => 'Unknown',
+    };
+    _popular = widget.initialPopular ?? comic?.isPopular ?? false;
     _recommended = comic?.isRecommended ?? false;
   }
 
@@ -427,6 +472,7 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
       _artist,
       _genres,
       _chapters,
+      _updatedAt,
     ]) {
       controller.dispose();
     }
@@ -468,6 +514,15 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
                 _field(_artist, 'Artist'),
                 _field(_genres, 'Genre, pisahkan dengan koma'),
                 _field(
+                  _updatedAt,
+                  'Waktu update lokal: YYYY-MM-DD HH:mm (opsional)',
+                  validator: (value) =>
+                      value!.trim().isNotEmpty &&
+                          DateTime.tryParse(value.trim()) == null
+                      ? 'Gunakan YYYY-MM-DD HH:mm'
+                      : null,
+                ),
+                _field(
                   _chapters,
                   'Jumlah chapter',
                   keyboardType: TextInputType.number,
@@ -488,7 +543,7 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
                 DropdownButtonFormField<String>(
                   initialValue: _status,
                   decoration: const InputDecoration(labelText: 'Status'),
-                  items: const ['Ongoing', 'Completed', 'Hiatus']
+                  items: const ['Ongoing', 'Completed', 'Hiatus', 'Unknown']
                       .map(
                         (value) =>
                             DropdownMenuItem(value: value, child: Text(value)),
@@ -500,9 +555,27 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Tampilkan di Populer'),
+                  subtitle: const Text(
+                    'Pilihan manual diprioritaskan dalam 7 slot. Hilangkan centang untuk menyembunyikan dari Populer.',
+                  ),
                   value: _popular,
-                  onChanged: (value) =>
-                      setState(() => _popular = value ?? false),
+                  onChanged: (value) => setState(() {
+                    _popular = value ?? false;
+                    _popularChanged = true;
+                    _automaticPopular = false;
+                  }),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _popularChanged = true;
+                    _automaticPopular = true;
+                    _popular = false;
+                  }),
+                  child: Text(
+                    _automaticPopular
+                        ? 'Peringkat otomatis akan digunakan'
+                        : 'Gunakan peringkat otomatis',
+                  ),
                 ),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
@@ -580,6 +653,9 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
     final id = _id.text.trim().isEmpty ? generatedId : _id.text.trim();
     Navigator.pop(context, <String, dynamic>{
       'id': id,
+      'content_updated_at': DateTime.tryParse(
+        _updatedAt.text.trim(),
+      )?.toUtc().toIso8601String(),
       'title': title,
       'cover_url': _cover.text.trim(),
       'synopsis': _synopsis.text.trim(),
@@ -593,7 +669,11 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
       'chapter_count': int.parse(_chapters.text.trim()),
       'format': _format,
       'status': _status,
-      'is_popular': _popular,
+      'is_popular': _popularChanged
+          ? (_automaticPopular ? false : _popular)
+          : widget.comic?.isPopular ?? false,
+      if (_popularChanged)
+        'popular_override': _automaticPopular ? null : _popular,
       'is_recommended': _recommended,
     });
   }

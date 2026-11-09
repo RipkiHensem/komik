@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../data/repositories/collection_repository.dart';
 import '../../../data/providers/collection_repository_provider.dart';
-import '../../widgets/proxied_image.dart';
+import '../../widgets/comic_cover.dart';
 import '../../widgets/collection_like_button.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
@@ -509,9 +509,8 @@ class _CollectionCardState extends State<_CollectionCard> {
                               ...List.generate(4, (i) {
                                 final url = i < covers.length ? covers[i] : '';
                                 return url.isNotEmpty
-                                    ? ProxiedImage(
+                                    ? ComicCover(
                                         imageUrl: url,
-                                        fit: BoxFit.cover,
                                       )
                                     : Container(color: AppColors.surfaceLight);
                               }),

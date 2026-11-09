@@ -37,6 +37,29 @@ class SupabaseCollectionRepository implements CollectionRepository {
   final SupabaseClient _client;
   static const _selection = '*, collection_items(*)';
 
+  Future<List<Collection>> _withAuthors(List<Map<String, dynamic>> rows) async {
+    if (rows.isEmpty) return [];
+    final authors = await _client.rpc('public_collection_authors');
+    final byId = {for (final p in (authors as List)) p['id']: p};
+    final own = _client.auth.currentUser;
+    if (own != null && rows.any((r) => r['user_id'] == own.id)) {
+      final profile = await _client
+          .from('profiles')
+          .select('id,username,avatar_url')
+          .eq('id', own.id)
+          .maybeSingle();
+      if (profile != null) byId[own.id] = profile;
+    }
+    return rows.map((r) {
+      final author = byId[r['user_id']];
+      return Collection.fromJson({
+        ...r,
+        'username': author?['username'],
+        'user_avatar_url': author?['avatar_url'],
+      });
+    }).toList();
+  }
+
   @override
   Future<void> updateCollection(
     String id, {
@@ -110,7 +133,7 @@ class SupabaseCollectionRepository implements CollectionRepository {
         .select(_selection)
         .eq('user_id', userId)
         .order('updated_at', ascending: false);
-    return rows.map(Collection.fromJson).toList();
+    return _withAuthors(rows);
   }
 
   @override
@@ -121,7 +144,7 @@ class SupabaseCollectionRepository implements CollectionRepository {
         .eq('is_public', true)
         .order('updated_at', ascending: false)
         .limit(50);
-    return rows.map(Collection.fromJson).toList();
+    return _withAuthors(rows);
   }
 
   @override
@@ -131,7 +154,7 @@ class SupabaseCollectionRepository implements CollectionRepository {
         .select(_selection)
         .eq('id', id)
         .maybeSingle();
-    return row == null ? null : Collection.fromJson(row);
+    return row == null ? null : (await _withAuthors([row])).single;
   }
 
   @override

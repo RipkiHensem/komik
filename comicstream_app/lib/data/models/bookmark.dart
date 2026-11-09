@@ -6,6 +6,7 @@ class Bookmark {
   final String? lastChapterId; // endpoint/slug chapter
   final int lastPage;
   final DateTime createdAt;
+  final DateTime? updatedAt;
 
   // Data yang opsional (diisi secara manual setelah fetch)
   final String? comicTitle;
@@ -19,6 +20,7 @@ class Bookmark {
     this.lastChapterId,
     this.lastPage = 1,
     required this.createdAt,
+    this.updatedAt,
     this.comicTitle,
     this.comicCoverUrl,
     this.lastChapterNumber,
@@ -35,6 +37,7 @@ class Bookmark {
           ? DateTime.parse(json['created_at'] as String)
           : DateTime.now(),
       comicTitle: json['comic_title'] as String?,
+      updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
       comicCoverUrl: json['comic_cover_url'] as String?,
       lastChapterNumber: json['last_chapter_number'] as int?,
     );
@@ -51,11 +54,32 @@ class Bookmark {
     };
   }
 
-  /// Progress display text
-  String get progressText {
-    if (lastChapterNumber != null && lastChapterNumber! > 0) {
-      return 'Chapter $lastChapterNumber';
+  /// Resolve source chapter slugs immediately, without waiting for comic detail.
+  String? get chapterLabel {
+    if (lastChapterNumber != null && lastChapterNumber! >= 0) {
+      return '$lastChapterNumber';
     }
-    return 'Chapter terakhir';
+    return RegExp(
+      r'(?:^|[-/])chapter[-_](\d+(?:\.\d+)?)(?:/)?$',
+      caseSensitive: false,
+    ).firstMatch(lastChapterId ?? '')?.group(1);
   }
+
+  String get progressText {
+    final label = chapterLabel;
+    return label == null ? 'Chapter tidak tersedia' : 'Chapter $label';
+  }
+
+  Bookmark withChapterNumber(int number) => Bookmark(
+    id: id,
+    userId: userId,
+    comicId: comicId,
+    lastChapterId: lastChapterId,
+    lastPage: lastPage,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    comicTitle: comicTitle,
+    comicCoverUrl: comicCoverUrl,
+    lastChapterNumber: number,
+  );
 }

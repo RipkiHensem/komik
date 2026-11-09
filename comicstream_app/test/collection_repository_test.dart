@@ -70,6 +70,18 @@ void main() {
 
   test('API success: GET includes public filter and returns model', () async {
     final repo = repository((request) async {
+      if (request.url.path.endsWith('/rpc/public_collection_authors')) {
+        return http.Response(
+          jsonEncode([
+            {
+              'id': 'user-1',
+              'username': 'Rhifqi',
+              'avatar_url': 'https://example.com/avatar.png',
+            },
+          ]),
+          200,
+        );
+      }
       expect(request.method, 'GET');
       expect(request.url.path, '/rest/v1/collections');
       expect(request.url.queryParameters['is_public'], 'eq.true');
@@ -81,6 +93,8 @@ void main() {
     });
     final result = await repo.getPublicCollections();
     expect(result.single.id, 'collection-1');
+    expect(result.single.username, 'Rhifqi');
+    expect(result.single.userAvatarUrl, 'https://example.com/avatar.png');
   });
 
   test(
@@ -158,7 +172,10 @@ void main() {
   test('retry: a second request succeeds after a failed request', () async {
     var calls = 0;
     final repo = repository(
-      (_) async => ++calls == 1
+      (request) async =>
+          request.url.path.endsWith('/rpc/public_collection_authors')
+          ? http.Response('[]', 200)
+          : ++calls == 1
           ? http.Response('{"message":"Denied","code":"42501"}', 403)
           : http.Response(jsonEncode([fixture()]), 200),
     );

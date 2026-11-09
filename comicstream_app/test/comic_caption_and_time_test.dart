@@ -3,6 +3,23 @@ import 'package:comicstream_app/data/models/chapter.dart';
 import 'package:comicstream_app/data/models/comic.dart';
 
 void main() {
+  test('editing metadata does not invent a content release time', () {
+    final comic = Comic.fromSupabase({
+      'id': 'test', 'title': 'Edited',
+      'updated_at': DateTime.now().toIso8601String(),
+      'content_updated_at': null,
+    });
+    expect(comic.updatedAt, isNull);
+  });
+
+  test('admin content date takes precedence over metadata modification', () {
+    final comic = Comic.fromSupabase({
+      'id': 'test', 'title': 'Edited',
+      'updated_at': '2026-10-30T00:00:00Z',
+      'content_updated_at': '2026-09-01T00:00:00Z',
+    });
+    expect(comic.updatedAt, DateTime.utc(2026, 9, 1));
+  });
   test('comic detail keeps a real update timestamp', () {
     final comic = Comic.fromDetailJson({
       'manga_endpoint': 'comic-1',

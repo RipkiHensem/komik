@@ -11,6 +11,7 @@ class ChapterTile extends StatelessWidget {
   final VoidCallback? onTap;
   final bool showDelete;
   final VoidCallback? onDelete;
+  final VoidCallback? onEdit;
   final DateTime? fallbackUpdatedAt;
 
   const ChapterTile({
@@ -22,6 +23,7 @@ class ChapterTile extends StatelessWidget {
     this.onTap,
     this.showDelete = false,
     this.onDelete,
+    this.onEdit,
     this.fallbackUpdatedAt,
   });
 
@@ -112,6 +114,12 @@ class ChapterTile extends StatelessWidget {
                 Icon(Icons.check, size: 18, color: AppColors.textSecondary)
               else
                 Icon(Icons.chevron_right, size: 18, color: AppColors.textMuted),
+              if (showDelete)
+                IconButton(
+                  tooltip: 'Edit chapter dan waktu rilis',
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 19),
+                ),
               if (showDelete)
                 IconButton(
                   tooltip: 'Hapus chapter dari aplikasi',

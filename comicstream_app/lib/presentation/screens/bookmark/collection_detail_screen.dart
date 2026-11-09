@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../data/providers/collection_repository_provider.dart';
-import '../../widgets/proxied_image.dart';
+import '../../widgets/comic_cover.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
 import '../../../data/models/collection.dart';
@@ -390,9 +390,8 @@ class _ComicItemCardState extends State<_ComicItemCard> {
                   child:
                       item.comicCoverUrl != null &&
                           item.comicCoverUrl!.isNotEmpty
-                      ? ProxiedImage(
+                      ? ComicCover(
                           imageUrl: item.comicCoverUrl!,
-                          fit: BoxFit.cover,
                         )
                       : Container(
                           color: AppColors.surfaceLight,
@@ -657,9 +656,8 @@ class _AddComicSheetState extends ConsumerState<_AddComicSheet> {
                                   width: 40,
                                   height: 56,
                                   child: comic.coverUrl.isNotEmpty
-                                      ? ProxiedImage(
+                                      ? ComicCover(
                                           imageUrl: comic.coverUrl,
-                                          fit: BoxFit.cover,
                                         )
                                       : Container(
                                           color: AppColors.surfaceLight,

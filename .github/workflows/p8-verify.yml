@@ -1,9 +1,10 @@
-name: P8 Flutter verification
+name: Yomu Flutter verification
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
-    branches: [main, codex/p8-verification]
+    branches: [main, 'codex/**']
 
 permissions:
   contents: read
