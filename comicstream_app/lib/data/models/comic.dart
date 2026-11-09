@@ -2,6 +2,62 @@ import 'chapter.dart';
 
 /// Model Comic yang disesuaikan dengan response dari mangamint API
 class Comic {
+  /// Prefer the current poster from detail; older lists can point to a stale
+  /// thumbnail host. Keep distinct fallbacks for image download failures.
+  static List<String> coverCandidates({
+    String? posterUrl,
+    required String thumbnailUrl,
+  }) {
+    final originals = <String>{
+      if (posterUrl != null && posterUrl.trim().isNotEmpty)
+        originalCoverUrl(posterUrl.trim()),
+      if (thumbnailUrl.trim().isNotEmpty) originalCoverUrl(thumbnailUrl.trim()),
+    };
+    final candidates = <String>{...originals};
+    for (final url in originals) {
+      final uri = Uri.tryParse(url);
+      if (uri != null &&
+          const {
+            'thumbnail.komiku.org',
+            'thumbnail.komiku.to',
+          }.contains(uri.host)) {
+        candidates.add(uri.toString().split('?').first);
+        final alternateHost = uri.host == 'thumbnail.komiku.org'
+            ? 'thumbnail.komiku.to'
+            : 'thumbnail.komiku.org';
+        candidates.add(
+          uri.replace(host: alternateHost).toString().split('?').first,
+        );
+      }
+    }
+    return candidates.toList();
+  }
+
+  /// List thumbnails can be server-cropped into wide banners. Keep the
+  /// original artwork on known thumbnail hosts; preserve unrelated URLs.
+  static String originalCoverUrl(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !const {
+          'thumbnail.komiku.org',
+          'thumbnail.komiku.to',
+        }.contains(uri.host)) {
+      return value;
+    }
+    final params = Map<String, String>.from(uri.queryParameters)
+      ..remove('resize')
+      ..remove('crop')
+      ..remove('fit')
+      ..remove('h')
+      ..remove('height')
+      ..remove('w')
+      ..remove('width')
+      ..remove('quality');
+    return params.isEmpty
+        ? value.split('?').first
+        : uri.replace(query: Uri(queryParameters: params).query).toString();
+  }
+
   final String id; // endpoint/slug dari API, mis: "solo-leveling"
   final String title;
   final String? alternativeTitle;
@@ -60,9 +116,8 @@ class Comic {
       rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
       viewCount: (json['view_count'] as num?)?.toInt() ?? 0,
       chapterCount: (json['chapter_count'] as num?)?.toInt() ?? 0,
-      updatedAt: json['updated_at'] != null
-          ? DateTime.tryParse(json['updated_at'].toString())
-          : null,
+      updatedAt: Chapter.parseDate(json.containsKey('content_updated_at')
+          ? json['content_updated_at'] : json['updated_at']),
       isPopular: json['is_popular'] == true,
       isRecommended: json['is_recommended'] == true,
     );

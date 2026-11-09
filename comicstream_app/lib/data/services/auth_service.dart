@@ -2,12 +2,14 @@ import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../repositories/profile_repository.dart';
+import '../repositories/history_repository.dart';
 import '../models/user.dart' as app_models;
 import '../models/bookmark.dart';
 
 /// Service untuk autentikasi dan data user menggunakan Supabase
 class SupabaseAuthService {
   SupabaseClient get _client => Supabase.instance.client;
+  late final HistoryRepository _history = HistoryRepository(_client);
 
   static const passwordRecoveryRedirect = 'comicstream://reset-password';
 
@@ -327,15 +329,7 @@ class SupabaseAuthService {
     final supaUser = _client.auth.currentUser;
     if (supaUser == null) return [];
 
-    final data = await _client
-        .from('history')
-        .select()
-        .eq('user_id', supaUser.id)
-        .order('updated_at', ascending: false);
-
-    return (data as List)
-        .map((json) => Bookmark.fromJson(json as Map<String, dynamic>))
-        .toList();
+    return _history.read(supaUser.id);
   }
 
   /// Simpan riwayat baca (upsert)
@@ -349,33 +343,28 @@ class SupabaseAuthService {
     final supaUser = _client.auth.currentUser;
     if (supaUser == null) return;
 
-    await _client.from('history').upsert({
-      'user_id': supaUser.id,
-      'comic_id': comicId,
-      'last_chapter_id': lastChapterId,
-      'last_page': lastPage ?? 1,
-      'comic_title': comicTitle,
-      'comic_cover_url': comicCoverUrl,
-      'updated_at': DateTime.now().toIso8601String(),
-    }, onConflict: 'user_id,comic_id');
+    await _history.save(
+      supaUser.id,
+      comicId: comicId,
+      chapterId: lastChapterId,
+      page: lastPage ?? 1,
+      title: comicTitle,
+      coverUrl: comicCoverUrl,
+    );
   }
 
   /// Hapus satu entri riwayat
   Future<void> deleteHistory(String historyId) async {
     final supaUser = _client.auth.currentUser;
     if (supaUser == null) return;
-    await _client
-        .from('history')
-        .delete()
-        .eq('id', historyId)
-        .eq('user_id', supaUser.id);
+    await _history.delete(supaUser.id, historyId);
   }
 
   /// Hapus semua riwayat baca
   Future<void> clearHistory() async {
     final supaUser = _client.auth.currentUser;
     if (supaUser == null) return;
-    await _client.from('history').delete().eq('user_id', supaUser.id);
+    await _history.clear(supaUser.id);
   }
 
   // ── Read Chapters (Supabase) ──────────────────────────────

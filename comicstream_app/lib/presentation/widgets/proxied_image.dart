@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 
@@ -10,6 +11,8 @@ import '../../core/theme/app_colors.dart';
 /// ulang saat chapter dibuka kembali.
 class ProxiedImage extends StatelessWidget {
   final String imageUrl;
+  final List<String> fallbackImageUrls;
+  final String? cacheNamespace;
   final double? width;
   final double? height;
   final BoxFit fit;
@@ -20,10 +23,13 @@ class ProxiedImage extends StatelessWidget {
   final int? cacheHeight;
   final FilterQuality filterQuality;
   final bool gaplessPlayback;
+  final ValueChanged<Size>? onImageSize;
 
   const ProxiedImage({
     super.key,
     required this.imageUrl,
+    this.fallbackImageUrls = const [],
+    this.cacheNamespace,
     this.width,
     this.height,
     this.fit = BoxFit.cover,
@@ -34,6 +40,7 @@ class ProxiedImage extends StatelessWidget {
     this.cacheHeight,
     this.filterQuality = FilterQuality.medium,
     this.gaplessPlayback = false,
+    this.onImageSize,
   });
 
   /// Converts a thumbnail URL to go through our Supabase Edge Function proxy
@@ -60,29 +67,55 @@ class ProxiedImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final proxiedUrl = resolveImageUrl(imageUrl);
+    final urls = [imageUrl, ...fallbackImageUrls]
+        .where((url) => url.trim().isNotEmpty)
+        .map(resolveImageUrl)
+        .toSet()
+        .toList();
 
-    if (proxiedUrl.isEmpty) {
+    if (urls.isEmpty) {
       return _buildPlaceholder();
     }
 
     // CachedNetworkImage menyimpan gambar ke disk cache sehingga saat chapter
     // dibuka kembali gambar tidak perlu di-download ulang dari internet.
-    Widget image = CachedNetworkImage(
-      imageUrl: proxiedUrl,
+    Widget imageAt(int index) => CachedNetworkImage(
+      imageUrl: urls[index],
+      cacheKey: cacheNamespace == null
+          ? null
+          : '$cacheNamespace:${urls[index]}',
       width: width,
       height: height,
       fit: fit,
       filterQuality: filterQuality,
-      fadeInDuration: const Duration(milliseconds: 200),
-      fadeOutDuration: const Duration(milliseconds: 100),
+      fadeInDuration: gaplessPlayback
+          ? Duration.zero
+          : const Duration(milliseconds: 200),
+      fadeOutDuration: gaplessPlayback
+          ? Duration.zero
+          : const Duration(milliseconds: 100),
+      imageBuilder: gaplessPlayback
+          ? (context, provider) => _ImageSizeReporter(
+              onSize: onImageSize,
+              child: Image(
+                image: provider,
+                width: width,
+                height: height,
+                fit: fit,
+                filterQuality: filterQuality,
+                gaplessPlayback: gaplessPlayback,
+              ),
+            )
+          : null,
       memCacheWidth: cacheWidth,
       memCacheHeight: cacheHeight,
       placeholder: (context, url) =>
           placeholder ??
           Container(
             width: width,
-            height: height,
+            height:
+                height ??
+                (gaplessPlayback && width != null ? width! * 1.4 : null),
             color: AppColors.surface,
             child: Center(
               child: CircularProgressIndicator(
@@ -91,9 +124,12 @@ class ProxiedImage extends StatelessWidget {
               ),
             ),
           ),
-      errorWidget: (context, url, error) =>
-          errorWidget ?? _buildPlaceholder(),
+      errorWidget: (context, url, error) => index + 1 < urls.length
+          ? imageAt(index + 1)
+          : errorWidget ?? _buildPlaceholder(),
     );
+
+    Widget image = imageAt(0);
 
     if (borderRadius != null) {
       image = ClipRRect(borderRadius: borderRadius!, child: image);
@@ -138,5 +174,27 @@ class ProxiedImage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ImageSizeReporter extends SingleChildRenderObjectWidget {
+  final ValueChanged<Size>? onSize;
+  const _ImageSizeReporter({required super.child, this.onSize});
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _ImageSizeRender(onSize);
+  @override
+  void updateRenderObject(BuildContext context, _ImageSizeRender renderObject) {
+    renderObject.onSize = onSize;
+  }
+}
+
+class _ImageSizeRender extends RenderProxyBox {
+  ValueChanged<Size>? onSize;
+  _ImageSizeRender(this.onSize);
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size.width > 0 && size.height > 0) onSize?.call(size);
   }
 }

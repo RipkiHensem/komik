@@ -5,18 +5,8 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/chapter.dart';
 import '../../data/models/comic.dart';
 import '../../data/providers/providers.dart';
-import '../../data/services/api_service.dart';
-import 'proxied_image.dart';
-
-final MangaApiService _coverApi = MangaApiService();
-final Map<String, Future<String?>> _posterUrlCache = {};
-
-Future<String?> _posterUrlFor(String comicId) {
-  return _posterUrlCache.putIfAbsent(
-    comicId,
-    () => _coverApi.getComicCover(comicId),
-  );
-}
+import '../../data/services/api_service.dart' show ComicUnavailableException;
+import 'comic_cover.dart';
 
 /// Compact cover-first card shared by the home and search comic lists.
 class ComicCard extends ConsumerStatefulWidget {
@@ -38,35 +28,10 @@ class ComicCard extends ConsumerStatefulWidget {
 class _ComicCardState extends ConsumerState<ComicCard> {
   bool _isPressed = false;
   bool _isHovered = false;
-  late String _coverUrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _coverUrl = widget.comic.coverUrl;
-    _loadPosterUrl();
-  }
-
-  @override
-  void didUpdateWidget(covariant ComicCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.comic.id != widget.comic.id ||
-        oldWidget.comic.coverUrl != widget.comic.coverUrl) {
-      _coverUrl = widget.comic.coverUrl;
-      _loadPosterUrl();
-    }
-  }
-
-  Future<void> _loadPosterUrl() async {
-    final comicId = widget.comic.id;
-    final posterUrl = await _posterUrlFor(comicId);
-    if (!mounted || widget.comic.id != comicId || posterUrl == null) return;
-    if (posterUrl != _coverUrl) setState(() => _coverUrl = posterUrl);
-  }
-
   bool get _isRecentlyUpdated {
     final updatedAt = widget.comic.updatedAt;
-    return updatedAt != null && DateTime.now().difference(updatedAt).inHours < 24;
+    return updatedAt != null &&
+        DateTime.now().difference(updatedAt).inHours < 24;
   }
 
   @override
@@ -82,9 +47,8 @@ class _ComicCardState extends ConsumerState<ComicCard> {
         ? comic.chapterCount
         : chapters.fold<int>(
             0,
-            (total, chapter) => chapter.chapterNumber > total
-                ? chapter.chapterNumber
-                : total,
+            (total, chapter) =>
+                chapter.chapterNumber > total ? chapter.chapterNumber : total,
           );
 
     return MouseRegion(
@@ -119,9 +83,11 @@ class _ComicCardState extends ConsumerState<ComicCard> {
                         children: [
                           ColoredBox(
                             color: AppColors.surfaceLight,
-                            child: ProxiedImage(
-                              imageUrl: _coverUrl,
-                              fit: BoxFit.cover,
+                            // ComicCover normalizes cropped thumbnail URLs.
+                            // Render it immediately while detail loads.
+                            child: ComicCover(
+                              imageUrl: comic.coverUrl,
+                              posterUrl: detailComic?.coverUrl,
                             ),
                           ),
                           Positioned(
@@ -182,7 +148,7 @@ class _ComicCardState extends ConsumerState<ComicCard> {
                   width: double.infinity,
                   height: 37,
                   child: Text(
-                    comic.title,
+                    detailComic?.title ?? comic.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -215,17 +181,32 @@ class _ComicCardState extends ConsumerState<ComicCard> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '$chapterCount Ch',
+                    detailAsync.hasError ? '— Ch' : '$chapterCount Ch',
                     style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
               if (chapters.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                _buildRecentChapters(chapters.take(2).toList(), comic.updatedAt),
+                _buildRecentChapters(
+                  chapters.take(2).toList(),
+                  comic.updatedAt,
+                ),
               ] else if (detailAsync.isLoading) ...[
                 const SizedBox(height: 6),
                 _buildRecentChaptersLoading(),
+              ] else if (detailAsync.hasError) ...[
+                const SizedBox(height: 8),
+                Text(
+                  detailAsync.error is ComicUnavailableException
+                      ? 'Detail sumber bermasalah'
+                      : 'Chapter gagal dimuat',
+                  maxLines: 2,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ],
             ],
           ),
@@ -282,7 +263,10 @@ class _ComicCardState extends ConsumerState<ComicCard> {
                     Text(
                       relativeTime,
                       maxLines: 1,
-                      style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
                     ),
                   ],
                 ],
@@ -332,8 +316,10 @@ class ComicCardHero extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ProxiedImage(imageUrl: comic.coverUrl, fit: BoxFit.cover),
-              DecoratedBox(decoration: BoxDecoration(gradient: AppColors.cardOverlay)),
+              ComicCover(imageUrl: comic.coverUrl),
+              DecoratedBox(
+                decoration: BoxDecoration(gradient: AppColors.cardOverlay),
+              ),
               Positioned(
                 left: 16,
                 right: 16,

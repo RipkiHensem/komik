@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../widgets/proxied_image.dart';
+import '../../widgets/saved_comic_cover.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
 import '../../../data/models/bookmark.dart';
@@ -284,12 +284,13 @@ class _BookmarkTab extends ConsumerWidget {
               // Jika comicTitle null/kosong, ambil dari comicFromDetailProvider
               // agar kartu tidak tampil sebagai "Untitled"
               return Consumer(
+                key: ValueKey(bookmark.id),
                 builder: (context, ref, _) {
-                  final detailAsync = ref.watch(
-                    comicFromDetailProvider(bookmark.comicId),
-                  );
+                  final detailAsync = _needsMetadata(bookmark)
+                      ? ref.watch(comicFromDetailProvider(bookmark.comicId))
+                      : null;
                   final displayItem =
-                      detailAsync.whenOrNull(
+                      detailAsync?.whenOrNull(
                         data: (comic) => _withComicMetadata(bookmark, comic),
                       ) ??
                       bookmark;
@@ -492,30 +493,14 @@ class _HistoryTab extends ConsumerWidget {
                   itemBuilder: (context, index) {
                     final item = history[index];
                     return Consumer(
+                      key: ValueKey(item.id),
                       builder: (context, ref, _) {
-                        final detailAsync = ref.watch(
-                          comicFromDetailProvider(item.comicId),
-                        );
-                        final chaptersAsync = ref.watch(
-                          comicChaptersProvider(item.comicId),
-                        );
-                        final lastChapterNumber = chaptersAsync.whenOrNull(
-                          data: (chapters) {
-                            for (final chapter in chapters) {
-                              if (chapter.id == item.lastChapterId) {
-                                return chapter.chapterNumber;
-                              }
-                            }
-                            return null;
-                          },
-                        );
+                        final detailAsync = _needsMetadata(item)
+                            ? ref.watch(comicFromDetailProvider(item.comicId))
+                            : null;
                         final displayItem =
-                            detailAsync.whenOrNull(
-                              data: (comic) => _withComicMetadata(
-                                item,
-                                comic,
-                                lastChapterNumber: lastChapterNumber,
-                              ),
+                            detailAsync?.whenOrNull(
+                              data: (comic) => _withComicMetadata(item, comic),
                             ) ??
                             item;
 
@@ -562,6 +547,10 @@ class _HistoryTab extends ConsumerWidget {
   }
 }
 
+bool _needsMetadata(Bookmark item) =>
+    item.comicTitle?.trim().isNotEmpty != true ||
+    item.comicCoverUrl?.trim().isNotEmpty != true;
+
 Bookmark _withComicMetadata(
   Bookmark bookmark,
   Comic comic, {
@@ -574,6 +563,7 @@ Bookmark _withComicMetadata(
     lastChapterId: bookmark.lastChapterId,
     lastPage: bookmark.lastPage,
     createdAt: bookmark.createdAt,
+    updatedAt: bookmark.updatedAt,
     comicTitle: bookmark.comicTitle?.trim().isNotEmpty == true
         ? bookmark.comicTitle
         : comic.title,
@@ -587,7 +577,7 @@ Bookmark _withComicMetadata(
 // ── Shared modern bookmark/history card widget ───────────────────────
 class _BookmarkCard extends StatefulWidget {
   final Bookmark bookmark;
-  final VoidCallback onDelete;
+  final Future<void> Function() onDelete;
   final VoidCallback onTap;
   final VoidCallback? onContinue;
   final IconData icon;
@@ -608,6 +598,26 @@ class _BookmarkCard extends StatefulWidget {
 
 class _BookmarkCardState extends State<_BookmarkCard> {
   bool _isHovered = false;
+  bool _isDeleting = false;
+
+  Future<void> _delete() async {
+    if (_isDeleting) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _isDeleting = true);
+    try {
+      await widget.onDelete();
+    } catch (_) {
+      if (messenger.mounted) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Gagal menghapus. Periksa koneksi lalu coba lagi.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -640,7 +650,12 @@ class _BookmarkCardState extends State<_BookmarkCard> {
           ],
         ),
       ),
-      onDismissed: (_) => widget.onDelete(),
+      // The provider removes the row after persistence succeeds. Keeping the
+      // Dismissible undismissed also lets a failed swipe return to its place.
+      confirmDismiss: (_) async {
+        await _delete();
+        return false;
+      },
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _isHovered = true),
@@ -698,11 +713,8 @@ class _BookmarkCardState extends State<_BookmarkCard> {
                         ],
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: ProxiedImage(
+                      child: SavedComicCover(
                         imageUrl: bookmark.comicCoverUrl ?? '',
-                        width: 68,
-                        height: 94,
-                        fit: BoxFit.cover,
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -812,14 +824,24 @@ class _BookmarkCardState extends State<_BookmarkCard> {
                     HoverWidget(
                       scale: 1.15,
                       child: IconButton(
-                        icon: Icon(
-                          Icons.delete_outline_rounded,
-                          color: AppColors.textMuted.withValues(alpha: 0.7),
-                          size: 20,
-                        ),
+                        icon: _isDeleting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                Icons.delete_outline_rounded,
+                                color: AppColors.textMuted.withValues(
+                                  alpha: 0.7,
+                                ),
+                                size: 20,
+                              ),
                         splashRadius: 20,
                         tooltip: 'Hapus',
-                        onPressed: widget.onDelete,
+                        onPressed: _isDeleting ? null : _delete,
                       ),
                     ),
                   ],

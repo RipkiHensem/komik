@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import '../../../data/services/api_service.dart' show ChapterSourceException;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -34,10 +35,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   bool _showOverlay = true;
   Timer? _hideOverlayTimer;
   Timer? _progressSaveTimer;
-  final String _readingMode = AppConstants.readingModeScroll; // Default vertical scroll for webtoons
+  final String _readingMode =
+      AppConstants.readingModeScroll; // Default vertical scroll for webtoons
   int _currentPage = 0;
   final PageController _pageController = PageController();
   final ScrollController _scrollController = ScrollController();
+  // Preserve layout after lazy list items are disposed and recreated.
+  // Store only ratios, not decoded images, to keep memory bounded.
+  final Map<String, double> _pageAspectRatios = {};
   final FocusNode _focusNode = FocusNode();
   String? _comicTitle;
   String? _comicCoverUrl;
@@ -45,6 +50,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   int? _lastPersistedPage;
   bool _metadataWasPersisted = false;
   bool _chapterMarkedAsRead = false;
+  Comic? _readingComic;
+  bool _imageDecoded = false;
+  bool _readRecorded = false;
+  bool _recordingRead = false;
 
   @override
   void initState() {
@@ -98,13 +107,38 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (_isLoadingComicMetadata || _comicTitle != null) return;
     _isLoadingComicMetadata = true;
 
-    ref.read(comicFromDetailProvider(widget.comicId).future).then((Comic comic) {
+    ref
+        .read(comicFromDetailProvider(widget.comicId).future)
+        .then((Comic comic) {
+          if (!mounted) return;
+          _readingComic = comic;
+          _recordWeeklyRead();
+          _comicTitle = comic.title;
+          _comicCoverUrl = comic.coverUrl;
+          _scheduleProgressSave(_currentPage + 1);
+        })
+        .catchError((_) {
+          // Riwayat tetap dapat disimpan walau metadata komik sedang tidak tersedia.
+        });
+  }
+
+  void _recordWeeklyRead() {
+    final comic = _readingComic;
+    if (!mounted ||
+        !_imageDecoded ||
+        comic == null ||
+        _readRecorded ||
+        _recordingRead) {
+      return;
+    }
+    _recordingRead = true;
+    ref.read(readPopularityTrackerProvider).record(comic).then((sent) {
       if (!mounted) return;
-      _comicTitle = comic.title;
-      _comicCoverUrl = comic.coverUrl;
-      _scheduleProgressSave(_currentPage + 1);
-    }).catchError((_) {
-      // Riwayat tetap dapat disimpan walau metadata komik sedang tidak tersedia.
+      _recordingRead = false;
+      if (sent) {
+        _readRecorded = true;
+        ref.invalidate(popularComicsByFormatProvider);
+      }
     });
   }
 
@@ -139,7 +173,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           .markAsRead(widget.chapterId);
     }
 
-    ref.read(historyProvider.notifier).recordProgress(
+    ref
+        .read(historyProvider.notifier)
+        .recordProgress(
           comicId: widget.comicId,
           chapterId: widget.chapterId,
           page: pageNumber,
@@ -153,8 +189,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (_readingMode == AppConstants.readingModeScroll) {
       if (!_scrollController.hasClients) return;
       final step = MediaQuery.of(context).size.height * 0.65;
-      final target = (_scrollController.offset + step)
-          .clamp(0.0, _scrollController.position.maxScrollExtent);
+      final target = (_scrollController.offset + step).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
       _scrollController.animateTo(
         target,
         duration: const Duration(milliseconds: 280),
@@ -174,8 +212,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (_readingMode == AppConstants.readingModeScroll) {
       if (!_scrollController.hasClients) return;
       final step = MediaQuery.of(context).size.height * 0.65;
-      final target = (_scrollController.offset - step)
-          .clamp(0.0, _scrollController.position.maxScrollExtent);
+      final target = (_scrollController.offset - step).clamp(
+        0.0,
+        _scrollController.position.maxScrollExtent,
+      );
       _scrollController.animateTo(
         target,
         duration: const Duration(milliseconds: 280),
@@ -206,7 +246,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _goToChapter(String targetChapterId) {
     _flushProgress();
     _hideOverlayTimer?.cancel();
-    context.pushReplacement('/comic/${widget.comicId}/chapter/$targetChapterId');
+    context.pushReplacement(
+      '/comic/${widget.comicId}/chapter/$targetChapterId',
+    );
   }
 
   void _handleKeyEvent(KeyEvent event) {
@@ -270,7 +312,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   appBar: AppBar(
                     backgroundColor: Colors.black,
                     leading: IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      icon: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                      ),
                       onPressed: _handleExit,
                     ),
                     title: const Text(
@@ -346,9 +391,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               return Stack(
                 children: [
                   // ── Full-screen reader content ──
-                  Positioned.fill(
-                    child: scrollableContent,
-                  ),
+                  Positioned.fill(child: scrollableContent),
 
                   // Minimal reader header: back and current chapter.
                   Positioned(
@@ -382,7 +425,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                     tooltip: 'Kembali',
                                     style: IconButton.styleFrom(
                                       minimumSize: const Size(44, 44),
-                                      backgroundColor: Colors.black.withValues(alpha: 0.35),
+                                      backgroundColor: Colors.black.withValues(
+                                        alpha: 0.35,
+                                      ),
                                       foregroundColor: Colors.white,
                                     ),
                                     icon: const Icon(Icons.arrow_back_rounded),
@@ -395,7 +440,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                       shadows: [
-                                        Shadow(color: Colors.black54, blurRadius: 8),
+                                        Shadow(
+                                          color: Colors.black54,
+                                          blurRadius: 8,
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -420,10 +468,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                     tooltip: 'Komentar chapter',
                                     style: IconButton.styleFrom(
                                       minimumSize: const Size(44, 44),
-                                      backgroundColor: Colors.black.withValues(alpha: 0.35),
+                                      backgroundColor: Colors.black.withValues(
+                                        alpha: 0.35,
+                                      ),
                                       foregroundColor: Colors.white,
                                     ),
-                                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                                    icon: const Icon(
+                                      Icons.chat_bubble_outline_rounded,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -460,7 +512,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             ),
             error: (err, stack) => Center(
               child: ErrorView(
-                message: 'Gagal memuat halaman chapter.',
+                message: err is ChapterSourceException
+                    ? err.toString()
+                    : 'Gagal memuat halaman chapter. Periksa koneksi lalu coba lagi.',
                 onRetry: () =>
                     ref.invalidate(chapterPagesProvider(widget.chapterId)),
               ),
@@ -490,8 +544,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               child: ProxiedImage(
                 imageUrl: pages[index].imageUrl,
                 fit: BoxFit.contain,
-                cacheWidth: (readerWidth * MediaQuery.devicePixelRatioOf(context))
-                    .round(),
+                cacheWidth:
+                    (readerWidth * MediaQuery.devicePixelRatioOf(context))
+                        .round(),
                 cacheHeight: _maxReaderImageDecodeHeight,
                 filterQuality: FilterQuality.low,
                 gaplessPlayback: true,
@@ -513,7 +568,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         // Menyimpan posisi saat scroll selesai saja. Menjadwalkan timer pada
         // setiap frame scroll dapat membuat reader terasa tersendat di HP.
         if (notification is ScrollEndNotification) {
-          final maxExt = _scrollController.hasClients &&
+          final maxExt =
+              _scrollController.hasClients &&
                   _scrollController.position.maxScrollExtent > 0
               ? _scrollController.position.maxScrollExtent
               : 1.0;
@@ -553,8 +609,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 imageUrl: pages[index].imageUrl,
                 fit: BoxFit.fitWidth,
                 width: readerWidth,
-                cacheWidth: (readerWidth * MediaQuery.devicePixelRatioOf(context))
-                    .round(),
+                height: _pageAspectRatios.containsKey(pages[index].imageUrl)
+                    ? readerWidth / _pageAspectRatios[pages[index].imageUrl]!
+                    : null,
+                onImageSize: (size) {
+                  _imageDecoded = true;
+                  _recordWeeklyRead();
+                  _pageAspectRatios[pages[index].imageUrl] =
+                      size.width / size.height;
+                },
+                cacheWidth:
+                    (readerWidth * MediaQuery.devicePixelRatioOf(context))
+                        .round(),
                 cacheHeight: _maxReaderImageDecodeHeight,
                 filterQuality: FilterQuality.low,
                 gaplessPlayback: true,
@@ -565,7 +631,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       ),
     );
   }
-
 }
 
 class ChapterCommentsSheet extends ConsumerStatefulWidget {
@@ -574,7 +639,8 @@ class ChapterCommentsSheet extends ConsumerStatefulWidget {
   const ChapterCommentsSheet({super.key, required this.chapterId});
 
   @override
-  ConsumerState<ChapterCommentsSheet> createState() => _ChapterCommentsSheetState();
+  ConsumerState<ChapterCommentsSheet> createState() =>
+      _ChapterCommentsSheetState();
 }
 
 class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
@@ -613,15 +679,26 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
             ),
             child: Row(
               children: [
-                Icon(Icons.chat_bubble_outline_rounded, color: AppColors.primary, size: 20),
+                Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Komentar Chapter',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: AppColors.textSecondary,
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
@@ -634,30 +711,47 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
               data: (comments) {
                 if (comments.isEmpty) {
                   return Center(
-                    child: Text('Belum ada komentar.', style: TextStyle(color: AppColors.textMuted)),
+                    child: Text(
+                      'Belum ada komentar.',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
                   );
                 }
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: comments.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 12),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final comment = comments[index];
                     final isOwn = isLoggedIn && comment.userId == user.id;
-                    final isSpoilerRevealed = _revealedSpoilers.contains(comment.id);
+                    final isSpoilerRevealed = _revealedSpoilers.contains(
+                      comment.id,
+                    );
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         CircleAvatar(
                           radius: 16,
                           backgroundColor: AppColors.primarySurface,
-                          backgroundImage: (comment.avatarUrl != null && comment.avatarUrl!.isNotEmpty)
+                          backgroundImage:
+                              (comment.avatarUrl != null &&
+                                  comment.avatarUrl!.isNotEmpty)
                               ? NetworkImage(comment.avatarUrl!)
                               : null,
-                          child: (comment.avatarUrl == null || comment.avatarUrl!.isEmpty)
+                          child:
+                              (comment.avatarUrl == null ||
+                                  comment.avatarUrl!.isEmpty)
                               ? Text(
-                                  (comment.username.isNotEmpty ? comment.username[0] : '?').toUpperCase(),
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary),
+                                  (comment.username.isNotEmpty
+                                          ? comment.username[0]
+                                          : '?')
+                                      .toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primary,
+                                  ),
                                 )
                               : null,
                         ),
@@ -684,21 +778,38 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,
-                                        color: isOwn ? AppColors.primary : AppColors.textPrimary,
+                                        color: isOwn
+                                            ? AppColors.primary
+                                            : AppColors.textPrimary,
                                       ),
                                     ),
                                     if (comment.isSpoiler) ...[
                                       const SizedBox(width: 6),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: Colors.orange.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                                          color: Colors.orange.withValues(
+                                            alpha: 0.15,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.orange.withValues(
+                                              alpha: 0.4,
+                                            ),
+                                          ),
                                         ),
                                         child: const Text(
                                           '⚠ Spoiler',
-                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.orange),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.orange,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -706,9 +817,19 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                     if (isOwn)
                                       GestureDetector(
                                         onTap: () {
-                                          ref.read(chapterCommentsProvider(widget.chapterId).notifier).deleteComment(comment.id);
+                                          ref
+                                              .read(
+                                                chapterCommentsProvider(
+                                                  widget.chapterId,
+                                                ).notifier,
+                                              )
+                                              .deleteComment(comment.id);
                                         },
-                                        child: Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.textMuted),
+                                        child: Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 16,
+                                          color: AppColors.textMuted,
+                                        ),
                                       ),
                                   ],
                                 ),
@@ -716,16 +837,34 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                 // ── Spoiler blur overlay ──────────────────────
                                 if (comment.isSpoiler && !isSpoilerRevealed)
                                   GestureDetector(
-                                    onTap: () => setState(() => _revealedSpoilers.add(comment.id)),
+                                    onTap: () => setState(
+                                      () => _revealedSpoilers.add(comment.id),
+                                    ),
                                     child: Stack(
                                       children: [
                                         // Teks asli tapi blur
                                         ImageFiltered(
                                           imageFilter: ColorFilter.matrix([
-                                            0, 0, 0, 0, 30,
-                                            0, 0, 0, 0, 30,
-                                            0, 0, 0, 0, 30,
-                                            0, 0, 0, 1, 0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            30,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            30,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            30,
+                                            0,
+                                            0,
+                                            0,
+                                            1,
+                                            0,
                                           ]),
                                           child: Text(
                                             comment.content,
@@ -734,8 +873,14 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                               color: AppColors.textSecondary,
                                               height: 1.4,
                                               shadows: const [
-                                                Shadow(blurRadius: 8, color: Colors.black),
-                                                Shadow(blurRadius: 8, color: Colors.black),
+                                                Shadow(
+                                                  blurRadius: 8,
+                                                  color: Colors.black,
+                                                ),
+                                                Shadow(
+                                                  blurRadius: 8,
+                                                  color: Colors.black,
+                                                ),
                                               ],
                                             ),
                                           ),
@@ -745,17 +890,29 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                           child: Container(
                                             alignment: Alignment.center,
                                             decoration: BoxDecoration(
-                                              color: Colors.black.withValues(alpha: 0.55),
-                                              borderRadius: BorderRadius.circular(6),
+                                              color: Colors.black.withValues(
+                                                alpha: 0.55,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
                                             ),
                                             child: Row(
-                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
                                               children: [
-                                                const Icon(Icons.visibility_outlined, size: 14, color: Colors.orange),
+                                                const Icon(
+                                                  Icons.visibility_outlined,
+                                                  size: 14,
+                                                  color: Colors.orange,
+                                                ),
                                                 const SizedBox(width: 5),
                                                 const Text(
                                                   'Ketuk untuk lihat spoiler',
-                                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.orange),
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Colors.orange,
+                                                  ),
                                                 ),
                                               ],
                                             ),
@@ -767,7 +924,11 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                 else
                                   Text(
                                     comment.content,
-                                    style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppColors.textSecondary,
+                                      height: 1.4,
+                                    ),
                                   ),
                               ],
                             ),
@@ -778,8 +939,15 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                   },
                 );
               },
-              loading: () => Center(child: CircularProgressIndicator(color: AppColors.primary)),
-              error: (err, stack) => const Center(child: Text('Gagal memuat komentar', style: TextStyle(color: Colors.red))),
+              loading: () => Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
+              error: (err, stack) => const Center(
+                child: Text(
+                  'Gagal memuat komentar',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
             ),
           ),
 
@@ -807,7 +975,9 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                color: _isSpoiler ? Colors.orange : AppColors.glassBorder,
+                                color: _isSpoiler
+                                    ? Colors.orange
+                                    : AppColors.glassBorder,
                                 width: 1.5,
                               ),
                               color: _isSpoiler
@@ -815,7 +985,11 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                                   : Colors.transparent,
                             ),
                             child: _isSpoiler
-                                ? const Icon(Icons.check, size: 12, color: Colors.orange)
+                                ? const Icon(
+                                    Icons.check,
+                                    size: 12,
+                                    color: Colors.orange,
+                                  )
                                 : null,
                           ),
                           const SizedBox(width: 8),
@@ -824,7 +998,9 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: _isSpoiler ? Colors.orange : AppColors.textMuted,
+                              color: _isSpoiler
+                                  ? Colors.orange
+                                  : AppColors.textMuted,
                             ),
                           ),
                         ],
@@ -842,13 +1018,20 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                         maxLines: 3,
                         minLines: 1,
                         onChanged: (_) => setState(() {}),
-                        style: TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textPrimary,
+                        ),
                         decoration: InputDecoration(
-                          hintText: isLoggedIn ? 'Tulis komentar...' : 'Masuk untuk komentar',
+                          hintText: isLoggedIn
+                              ? 'Tulis komentar...'
+                              : 'Masuk untuk komentar',
                           hintStyle: TextStyle(color: AppColors.textMuted),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: AppColors.glassBorder),
+                            borderSide: BorderSide(
+                              color: AppColors.glassBorder,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -861,25 +1044,39 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
-                              color: _isSpoiler ? Colors.orange : AppColors.primary,
+                              color: _isSpoiler
+                                  ? Colors.orange
+                                  : AppColors.primary,
                             ),
                           ),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     IconButton(
-                      onPressed: (isLoggedIn && _commentController.text.trim().isNotEmpty && !_isSending)
+                      onPressed:
+                          (isLoggedIn &&
+                              _commentController.text.trim().isNotEmpty &&
+                              !_isSending)
                           ? () async {
                               setState(() => _isSending = true);
-                              await ref.read(chapterCommentsProvider(widget.chapterId).notifier).postComment(
-                                userId: user.id,
-                                username: user.username,
-                                avatarUrl: user.avatarUrl,
-                                content: _commentController.text,
-                                isSpoiler: _isSpoiler,
-                              );
+                              await ref
+                                  .read(
+                                    chapterCommentsProvider(
+                                      widget.chapterId,
+                                    ).notifier,
+                                  )
+                                  .postComment(
+                                    userId: user.id,
+                                    username: user.username,
+                                    avatarUrl: user.avatarUrl,
+                                    content: _commentController.text,
+                                    isSpoiler: _isSpoiler,
+                                  );
                               _commentController.clear();
                               setState(() {
                                 _isSending = false;
@@ -888,13 +1085,21 @@ class _ChapterCommentsSheetState extends ConsumerState<ChapterCommentsSheet> {
                             }
                           : null,
                       icon: _isSending
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
                           : Icon(
                               Icons.send_rounded,
-                              color: (isLoggedIn && _commentController.text.trim().isNotEmpty) ? AppColors.primary : AppColors.textMuted,
+                              color:
+                                  (isLoggedIn &&
+                                      _commentController.text.trim().isNotEmpty)
+                                  ? AppColors.primary
+                                  : AppColors.textMuted,
                             ),
                     ),
-                    ],
+                  ],
                 ),
               ],
             ),
@@ -937,10 +1142,7 @@ class _ChapterNavBar extends ConsumerWidget {
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.78),
-            Colors.transparent,
-          ],
+          colors: [Colors.black.withValues(alpha: 0.78), Colors.transparent],
         ),
       ),
       child: SafeArea(
