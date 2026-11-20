@@ -12,12 +12,12 @@ class ShinigamiApiService {
           dio ??
           Dio(
             BaseOptions(
-              baseUrl: 'https://api.shngm.io',
+              baseUrl: 'https://api.shinigami.io',
               connectTimeout: const Duration(seconds: 20),
               receiveTimeout: const Duration(seconds: 30),
               headers: {
                 'Accept': 'application/json',
-                'Origin': 'https://app.shinigami.asia',
+                'Origin': 'https://s1.shinigami.mx',
                 'DNT': '1',
               },
             ),
@@ -79,6 +79,8 @@ class ShinigamiApiService {
       queryParameters: {
         'page': page,
         'page_size': 30,
+        'limit': 30,
+        'offset': (page - 1) * 30,
         'sort': sort,
         if (format != null) 'format': format.toLowerCase(),
         if (genres.isNotEmpty) 'genre': genreSlug(genres.first),
@@ -90,7 +92,11 @@ class ShinigamiApiService {
     final total = meta is Map ? int.tryParse('${meta['total_page']}') : null;
     return ComicCatalogPage(
       raw.whereType<Map>().map(_comic).toList(),
-      hasMore: total != null ? page < total : raw.length >= 30,
+      hasMore: meta is Map && meta['has_next'] is bool
+          ? meta['has_next'] as bool
+          : total != null
+          ? page < total
+          : raw.length >= 30,
     );
   }
 
@@ -126,11 +132,26 @@ class ShinigamiApiService {
       throw StateError('Detail komik Shinigami tidak tersedia.');
     }
     final comic = _comic(data);
-    final chapters = await _dio.get(
-      '/v1/chapter/$id/list',
-      queryParameters: {'page_size': 3000},
-    );
-    final items = _items(chapters.data).whereType<Map>().toList();
+    final items = <Map>[];
+    final seenCursors = <String>{};
+    String? cursor;
+    do {
+      final response = await _dio.get(
+        '/v1/chapter/$id/list',
+        queryParameters: {'limit': 100, 'cursor': ?cursor},
+      );
+      final body = response.data;
+      if (body is! Map || (body['retcode'] != null && body['retcode'] != 0)) {
+        throw StateError('Daftar chapter Shinigami tidak tersedia.');
+      }
+      items.addAll(_items(body).whereType<Map>());
+      final meta = body['meta'];
+      if (meta is! Map || meta['has_next'] != true) break;
+      cursor = meta['next_cursor']?.toString();
+      if (cursor == null || cursor.isEmpty || !seenCursors.add(cursor)) {
+        throw StateError('Pagination chapter Shinigami tidak valid.');
+      }
+    } while (true);
     final mapped = items.map((item) {
       final chapterId =
           item['chapter_id']?.toString() ?? item['id']?.toString() ?? '';
@@ -157,10 +178,17 @@ class ShinigamiApiService {
       throw ArgumentError('ID chapter Shinigami tidak valid.');
     }
     final response = await _dio.get('/v1/chapter/detail/${parts[2]}');
-    final data = response.data is Map ? response.data['data'] : null;
+    if (response.data is! Map ||
+        (response.data['retcode'] != null && response.data['retcode'] != 0)) {
+      throw StateError('Halaman chapter Shinigami tidak tersedia.');
+    }
+    final data = response.data['data'];
     final chapter = data is Map ? data['chapter'] : null;
     final base = chapter is Map
-        ? (chapter['base_url'] ?? data['base_url_low'] ?? '')
+        ? (data['base_url'] ??
+              chapter['base_url'] ??
+              data['base_url_low'] ??
+              '')
         : '';
     final path = chapter is Map ? (chapter['path'] ?? '') : '';
     final images = chapter is Map && chapter['data'] is List

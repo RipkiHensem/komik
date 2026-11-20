@@ -80,6 +80,12 @@ class ProxiedImage extends StatelessWidget {
     // CachedNetworkImage menyimpan gambar ke disk cache sehingga saat chapter
     // dibuka kembali gambar tidak perlu di-download ulang dari internet.
     Widget imageAt(int index) => CachedNetworkImage(
+      httpHeaders: Uri.tryParse(urls[index])?.host == 'cdn.shinigami.gg'
+          ? const {
+              'Referer': 'https://s1.shinigami.mx/',
+              'User-Agent': 'Mozilla/5.0',
+            }
+          : null,
       imageUrl: urls[index],
       cacheKey: cacheNamespace == null
           ? null
