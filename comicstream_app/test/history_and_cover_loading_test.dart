@@ -44,9 +44,16 @@ void main() {
         true,
         loadChapters: (_) => chapters.future,
       );
-      final ready = notifier.stream.firstWhere((value) => value.hasValue);
+      final resolved = notifier.stream.firstWhere(
+        (value) => value.hasValue &&
+            value.requireValue.single.progressText == 'Chapter 14',
+      );
       await Future<void>.delayed(Duration.zero);
-      expect(notifier.state.isLoading, isTrue);
+      expect(notifier.state.hasValue, isTrue);
+      expect(
+        notifier.state.requireValue.single.progressText,
+        'Chapter tidak tersedia',
+      );
       chapters.complete([
         const Chapter(
           id: 'opaque-id',
@@ -55,7 +62,7 @@ void main() {
           releasedAt: null,
         ),
       ]);
-      expect((await ready).requireValue.single.progressText, 'Chapter 14');
+      expect((await resolved).requireValue.single.progressText, 'Chapter 14');
       notifier.dispose();
     },
   );

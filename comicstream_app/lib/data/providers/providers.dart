@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -719,11 +720,34 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     }
     state = const AsyncValue.loading();
     try {
-      final history = await _resolvedHistory();
-      if (mounted) state = AsyncValue.data(history);
+      final history = HistoryIdentity.merge(await _authService.getMyHistory());
+      if (!mounted) return;
+      state = AsyncValue.data(history);
+      // Resolve chapter labels after publishing the history so network requests
+      // for old entries cannot delay the continue-reading button.
+      unawaited(_resolveHistoryLabels(history));
     } catch (e, st) {
       if (mounted) state = AsyncValue.error(e, st);
     }
+  }
+
+  Future<void> _resolveHistoryLabels(List<Bookmark> history) async {
+    if (_loadChapters == null) return;
+    final resolved = await Future.wait(
+      history.map((item) async {
+        if (item.chapterLabel != null || item.lastChapterId == null) return item;
+        try {
+          final chapters = await _loadChapters(item.comicId);
+          for (final chapter in chapters) {
+            if (chapter.id == item.lastChapterId) {
+              return item.withChapterNumber(chapter.chapterNumber);
+            }
+          }
+        } catch (_) {}
+        return item;
+      }),
+    );
+    if (mounted) state = AsyncValue.data(resolved);
   }
 
   Future<void> deleteEntry(String historyId) async {

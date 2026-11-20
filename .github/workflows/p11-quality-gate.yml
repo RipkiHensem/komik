@@ -1,10 +1,10 @@
-name: Yomu Flutter verification
+name: P11 Yomu quality gate
 
 on:
   pull_request:
   workflow_dispatch:
   push:
-    branches: [main, 'codex/**']
+    branches: [main, 'codex/**', 'v1.0_dev']
 
 permissions:
   contents: read

@@ -379,15 +379,20 @@ Future<Map<String, dynamic>?> showComicEditor(
   Comic? comic,
 ) async {
   bool? selected;
+  var chapterCount = comic?.chapterCount ?? 0;
   if (comic != null) {
     try {
-      final lists = await Future.wait([
+      final results = await Future.wait([
         ref.read(popularComicsByFormatProvider(null).future),
         ref.read(popularComicsByFormatProvider(comic.format).future),
+        ref.read(comicChaptersProvider(comic.id).future),
       ]);
-      selected = lists
+      final popularLists = results[0] as List<List<Comic>>;
+      selected = popularLists
           .expand((list) => list)
           .any((item) => item.id == comic.id);
+      final chapters = results[2] as List<Chapter>;
+      if (chapters.isNotEmpty) chapterCount = chapters.length;
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -402,14 +407,19 @@ Future<Map<String, dynamic>?> showComicEditor(
   if (!context.mounted) return null;
   return showDialog<Map<String, dynamic>>(
     context: context,
-    builder: (_) => ComicEditorDialog(comic: comic, initialPopular: selected),
+    builder: (_) => ComicEditorDialog(
+      comic: comic,
+      initialPopular: selected,
+      initialChapterCount: chapterCount,
+    ),
   );
 }
 
 class ComicEditorDialog extends StatefulWidget {
-  const ComicEditorDialog({super.key, this.comic, this.initialPopular});
+  const ComicEditorDialog({super.key, this.comic, this.initialPopular, this.initialChapterCount = 0});
   final bool? initialPopular;
   final Comic? comic;
+  final int initialChapterCount;
 
   @override
   State<ComicEditorDialog> createState() => _ComicEditorDialogState();
@@ -444,7 +454,7 @@ class _ComicEditorDialogState extends State<ComicEditorDialog> {
     _author = TextEditingController(text: comic?.author ?? '');
     _artist = TextEditingController(text: comic?.artist ?? '');
     _genres = TextEditingController(text: comic?.genres.join(', ') ?? '');
-    _chapters = TextEditingController(text: '${comic?.chapterCount ?? 0}');
+    _chapters = TextEditingController(text: '${widget.initialChapterCount}');
     _updatedAt = TextEditingController(
       text: comic?.updatedAt?.toLocal().toIso8601String() ?? '',
     );

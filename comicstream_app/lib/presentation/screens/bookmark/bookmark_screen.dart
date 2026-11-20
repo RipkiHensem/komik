@@ -286,6 +286,9 @@ class _BookmarkTab extends ConsumerWidget {
               return Consumer(
                 key: ValueKey(bookmark.id),
                 builder: (context, ref, _) {
+                  final chapterCountAsync = ref.watch(
+                    comicChaptersProvider(bookmark.comicId),
+                  );
                   final detailAsync = _needsMetadata(bookmark)
                       ? ref.watch(comicFromDetailProvider(bookmark.comicId))
                       : null;
@@ -296,6 +299,11 @@ class _BookmarkTab extends ConsumerWidget {
                       bookmark;
                   return _BookmarkCard(
                     bookmark: displayItem,
+                    subtitleText: chapterCountAsync.when(
+                      data: (chapters) => '${chapters.length} Chapter',
+                      loading: () => 'Memuat jumlah chapter…',
+                      error: (_, _) => 'Jumlah chapter belum tersedia',
+                    ),
                     onDelete: () => ref
                         .read(bookmarksProvider.notifier)
                         .removeBookmarkByComicId(bookmark.comicId),
@@ -577,6 +585,7 @@ Bookmark _withComicMetadata(
 // ── Shared modern bookmark/history card widget ───────────────────────
 class _BookmarkCard extends StatefulWidget {
   final Bookmark bookmark;
+  final String? subtitleText;
   final Future<void> Function() onDelete;
   final VoidCallback onTap;
   final VoidCallback? onContinue;
@@ -585,6 +594,7 @@ class _BookmarkCard extends StatefulWidget {
 
   const _BookmarkCard({
     required this.bookmark,
+    this.subtitleText,
     required this.onDelete,
     required this.onTap,
     this.onContinue,
@@ -766,7 +776,7 @@ class _BookmarkCardState extends State<_BookmarkCard> {
                                 const SizedBox(width: 4.5),
                                 Flexible(
                                   child: Text(
-                                    bookmark.progressText,
+                                    widget.subtitleText ?? bookmark.progressText,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: GoogleFonts.plusJakartaSans(

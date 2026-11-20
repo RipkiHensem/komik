@@ -235,6 +235,9 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
         if (mounted) setState(() => _isSavingSynopsis = false);
       }
     } finally {
+      // Wait until the dialog route finishes its reverse transition before
+      // disposing the text controller still attached to the closing field.
+      await WidgetsBinding.instance.endOfFrame;
       controller.dispose();
     }
   }
@@ -410,8 +413,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
     final readChapters = ref.watch(readChaptersProvider(widget.comicId));
     final isAdmin = ref.watch(isAdminProvider).valueOrNull == true;
-    final history =
-        ref.watch(historyProvider).valueOrNull ?? const <Bookmark>[];
+    final historyAsync = ref.watch(historyProvider);
+    final history = historyAsync.valueOrNull ?? const <Bookmark>[];
     Bookmark? readingProgress;
     for (final entry in history) {
       if (entry.comicId == widget.comicId && entry.lastChapterId != null) {
@@ -625,6 +628,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                                   label: Text(
                                     !canRead
                                         ? 'Belum ada chapter'
+                                        : historyAsync.isLoading
+                                        ? 'Memuat riwayat...'
                                         : hasReadingProgress
                                         ? 'Lanjutkan Baca'
                                         : 'Mulai Baca',
