@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../../core/services/app_logger.dart';
 import '../models/chapter.dart';
 import '../models/comic.dart';
 import '../models/comic_page.dart';
@@ -21,7 +22,47 @@ class ShinigamiApiService {
                 'DNT': '1',
               },
             ),
+          ) {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          options.extra['yomuLogTimer'] = Stopwatch()..start();
+          AppLogger.info(
+            'API request',
+            detail: '${options.method} ${options.uri.path}',
           );
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          final timer = response.requestOptions.extra['yomuLogTimer'];
+          final elapsed = timer is Stopwatch ? timer.elapsedMilliseconds : null;
+          AppLogger.info(
+            'API response',
+            detail:
+                '${response.requestOptions.method} '
+                '${response.requestOptions.uri.path} '
+                'status=${response.statusCode ?? 0}'
+                '${elapsed == null ? '' : ' durationMs=$elapsed'}',
+          );
+          handler.next(response);
+        },
+        onError: (error, handler) {
+          final timer = error.requestOptions.extra['yomuLogTimer'];
+          final elapsed = timer is Stopwatch ? timer.elapsedMilliseconds : null;
+          AppLogger.error(
+            'API request failed',
+            error: error,
+            detail:
+                '${error.requestOptions.method} '
+                '${error.requestOptions.uri.path} '
+                'status=${error.response?.statusCode ?? 'network'}'
+                '${elapsed == null ? '' : ' durationMs=$elapsed'}',
+          );
+          handler.next(error);
+        },
+      ),
+    );
+  }
 
   List<dynamic> _items(dynamic data) => data is List
       ? data
@@ -57,6 +98,13 @@ class ShinigamiApiService {
         'Unknown',
     synopsis: item['description']?.toString() ?? '',
     author: _names(item, 'Author').join(', '),
+    updatedAt: Chapter.parseDate(
+      item['updated_at'] ??
+          item['updated_on'] ??
+          item['last_update'] ??
+          item['release_date'] ??
+          item['created_at'],
+    ),
     status: item['status'] == 1
         ? 'Ongoing'
         : item['status'] == 2

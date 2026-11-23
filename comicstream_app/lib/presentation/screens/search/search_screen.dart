@@ -141,7 +141,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           fontSize: 14,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Cari judul, genre, format...',
+                          hintText: 'Cari judul komik...',
                           hintStyle: TextStyle(
                             color: AppColors.textMuted,
                             fontSize: 13,
@@ -228,8 +228,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               ),
             ),
 
-            _genreFilters(searchState),
-
             // ── Filters Panel ─────────────────────────────────
             if (_showFilters) ...[
               const SizedBox(height: 12),
@@ -244,10 +242,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ],
 
             // ── Sort & Results Bar ────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
+            if (searchState.hasActiveFilters)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
                   Expanded(
                     child: Text(
                       browseState.isLoading && browseState.comics.isEmpty
@@ -346,12 +345,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       ),
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
             // ── Results Grid ──────────────────────────────────
-            Expanded(child: _buildBrowseResults(browseState)),
+            Expanded(
+              child: searchState.hasActiveFilters
+                  ? _buildBrowseResults(browseState)
+                  : _buildSearchPrompt(),
+            ),
           ],
         ),
       ),
@@ -360,6 +363,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _startBrowse(SearchState filter) {
     ref.read(exploreFormatProvider.notifier).state = filter.selectedFormat;
+    if (!filter.hasActiveFilters) {
+      ref.read(browseComicsProvider.notifier).clear();
+      return;
+    }
     ref
         .read(browseComicsProvider.notifier)
         .init(
@@ -371,52 +378,35 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         );
   }
 
-  Widget _genreFilters(SearchState filter) {
-    final genres = {
-      ...filter.selectedGenres,
-      ...AppConstants.genres,
-      ...ref.watch(browseComicsProvider).comics.expand((comic) => comic.genres),
-    };
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Row(
-        children: [
-          if (filter.selectedFormat != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GenreChip(
-                label: filter.selectedFormat!,
-                isSelected: true,
-                onTap: () => ref.read(searchStateProvider.notifier).state =
-                    filter.copyWith(selectedFormat: null),
+  Widget _buildSearchPrompt() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_rounded,
+              size: 44,
+              color: AppColors.textMuted,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Cari komik',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GenreChip(
-              label: 'Semua genre',
-              isSelected: filter.selectedGenres.isEmpty,
-              onTap: () => ref.read(searchStateProvider.notifier).state = filter
-                  .copyWith(selectedGenres: {}),
+            const SizedBox(height: 6),
+            Text(
+              'Masukkan judul atau pilih genre untuk melihat hasil.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
             ),
-          ),
-          ...genres.map(
-            (genre) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GenreChip(
-                label: genre,
-                isSelected: filter.selectedGenres.contains(genre),
-                onTap: () => ref.read(searchStateProvider.notifier).state =
-                    filter.copyWith(
-                      selectedGenres: filter.selectedGenres.contains(genre)
-                          ? {}
-                          : {genre},
-                    ),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

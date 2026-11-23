@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -26,90 +25,15 @@ class ChangeAvatarDialog extends ConsumerStatefulWidget {
   ConsumerState<ChangeAvatarDialog> createState() => _ChangeAvatarDialogState();
 }
 
-class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  late TextEditingController _urlController;
-
-  String? _selectedAvatarUrl;
+class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog> {
   Uint8List? _pendingImageBytes;
   String _pendingImageExtension = 'jpg';
   bool _isLoading = false;
   String? _errorMessage;
 
-  static const List<Map<String, String>> _presets = [
-    {
-      'name': 'Jinwoo',
-      'role': 'Solo Hunter',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Jinwoo',
-    },
-    {
-      'name': 'Zoro',
-      'role': 'Swordsman',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Zoro',
-    },
-    {
-      'name': 'Anya',
-      'role': 'Telepath',
-      'url': 'https://api.dicebear.com/7.x/lorelei/png?seed=Anya',
-    },
-    {
-      'name': 'Shadow',
-      'role': 'Monarch',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Shadow',
-    },
-    {
-      'name': 'Manga',
-      'role': 'Hero',
-      'url': 'https://api.dicebear.com/7.x/lorelei/png?seed=Manga',
-    },
-    {
-      'name': 'Cyber',
-      'role': 'Mecha',
-      'url': 'https://api.dicebear.com/7.x/bottts/png?seed=Cyber',
-    },
-    {
-      'name': 'Felix',
-      'role': 'Shinobi',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Felix',
-    },
-    {
-      'name': 'Aneka',
-      'role': 'Sorceress',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Aneka',
-    },
-    {
-      'name': 'Milo',
-      'role': 'Alchemist',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Milo',
-    },
-    {
-      'name': 'Ronin',
-      'role': 'Samurai',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Ronin',
-    },
-    {
-      'name': 'Shonen',
-      'role': 'Protagonist',
-      'url': 'https://api.dicebear.com/7.x/lorelei/png?seed=Shonen',
-    },
-    {
-      'name': 'Kitsune',
-      'role': 'Mystic',
-      'url': 'https://api.dicebear.com/7.x/adventurer/png?seed=Kitsune',
-    },
-  ];
-
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _urlController = TextEditingController();
-    _selectedAvatarUrl = widget.user?.avatarUrl;
-    if (_selectedAvatarUrl != null &&
-        !_presets.any((p) => p['url'] == _selectedAvatarUrl)) {
-      _urlController.text = _selectedAvatarUrl!;
-    }
     _recoverLostImage();
   }
 
@@ -139,16 +63,11 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
       _pendingImageExtension = image.name.contains('.')
           ? image.name.split('.').last
           : 'jpg';
-      _selectedAvatarUrl = null;
-      _urlController.clear();
-      _tabController.index = 1;
     });
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
-    _urlController.dispose();
     super.dispose();
   }
 
@@ -182,84 +101,20 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
     }
   }
 
-  Future<void> _showImageSourceSheet() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      backgroundColor: AppColors.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.divider,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Foto profil',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.camera_alt_outlined),
-                title: const Text('Ambil dari kamera'),
-                subtitle: const Text('Buka kamera perangkat'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Pilih dari galeri'),
-                subtitle: const Text('Pilih foto yang sudah ada'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (source != null && mounted) {
-      await _handlePickImage(source);
-    }
-  }
-
   Future<void> _saveAvatar() async {
+    if (_pendingImageBytes == null || _isLoading) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final success = _pendingImageBytes != null
-        ? await ref
-              .read(authProvider.notifier)
-              .uploadAvatarImage(
-                _pendingImageBytes!,
-                extension: _pendingImageExtension,
-              )
-        : await ref
-              .read(authProvider.notifier)
-              .updateAvatar(
-                _selectedAvatarUrl?.trim().isNotEmpty == true
-                    ? _selectedAvatarUrl!.trim()
-                    : null,
-              );
+    final success = await ref
+        .read(authProvider.notifier)
+        .uploadAvatarImage(
+          _pendingImageBytes!,
+          extension: _pendingImageExtension,
+        );
 
     if (!mounted) return;
 
@@ -320,7 +175,7 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
     final username = widget.user?.username ?? 'U';
     final initialLetter = username.isNotEmpty ? username[0].toUpperCase() : 'U';
     final screenHeight = MediaQuery.of(context).size.height;
-    final dialogMaxHeight = (screenHeight * 0.88).clamp(480.0, 660.0);
+    final dialogMaxHeight = screenHeight * 0.88;
 
     return Dialog(
       backgroundColor: AppColors.card,
@@ -329,327 +184,271 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: 500, maxHeight: dialogMaxHeight),
-        child: Column(
-          children: [
-            // ── Header ──────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.account_circle_rounded,
-                      color: AppColors.primary,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Ganti Foto Profil',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'Pilih karakter, unggah foto, atau link gambar',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  HoverWidget(
-                    scale: 1.15,
-                    child: IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: AppColors.textMuted,
-                      ),
-                      tooltip: 'Tutup',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: AppColors.divider),
-
-            // ── Preview Section ──────────────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              color: AppColors.surface.withValues(alpha: 0.5),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Header ──────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 10, 10),
+                child: Row(
                   children: [
-                    Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: AppColors.primaryGradient,
-                            border: Border.all(
-                              color: AppColors.primary,
-                              width: 2.5,
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        Icons.account_circle_rounded,
+                        color: AppColors.primary,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Ganti Foto Profil',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
                             ),
                           ),
-                          child: ClipOval(
-                            child: _buildPreviewContent(initialLetter),
+                          Text(
+                            'Pilih foto dari galeri atau ambil dengan kamera',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textMuted,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
+                        ],
+                      ),
+                    ),
+                    HoverWidget(
+                      scale: 1.15,
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: AppColors.textMuted,
                         ),
-                        if (_isLoading)
+                        tooltip: 'Tutup',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: AppColors.divider),
+
+              // ── Preview Section ──────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                color: AppColors.surface.withValues(alpha: 0.5),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
                           Container(
                             width: 76,
                             height: 76,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.black.withValues(alpha: 0.5),
-                            ),
-                            child: const Center(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 3,
-                                color: Colors.white,
+                              gradient: AppColors.primaryGradient,
+                              border: Border.all(
+                                color: AppColors.primary,
+                                width: 2.5,
                               ),
                             ),
+                            child: ClipOval(
+                              child: _buildPreviewContent(initialLetter),
+                            ),
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _pendingImageBytes != null
-                          ? 'Foto siap diunggah'
-                          : (_selectedAvatarUrl != null
-                                ? 'Preview Avatar Terpilih'
-                                : 'Avatar Default (Inisial)'),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
+                          if (_isLoading)
+                            Container(
+                              width: 76,
+                              height: 76,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(alpha: 0.5),
+                              ),
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(
+                        _pendingImageBytes != null
+                            ? 'Foto siap diunggah'
+                            : widget.user?.avatarUrl?.isNotEmpty == true
+                            ? 'Foto profil saat ini'
+                            : 'Avatar Default (Inisial)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
-            if (_errorMessage != null)
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.error.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: AppColors.error.withValues(alpha: 0.3),
+              if (_errorMessage != null)
+                Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
                   ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.error.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline_rounded,
+                        color: AppColors.error,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              _buildImagePicker(),
+
+              Divider(height: 1, color: AppColors.divider),
+
+              // ── Footer Actions ───────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.error_outline_rounded,
-                      color: AppColors.error,
-                      size: 16,
+                    if (widget.user?.avatarUrl != null)
+                      HoverWidget(
+                        scale: 1.05,
+                        child: TextButton.icon(
+                          onPressed: _isLoading ? null : _removeAvatar,
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 16,
+                            color: AppColors.error,
+                          ),
+                          label: Text(
+                            'Hapus',
+                            style: TextStyle(
+                              color: AppColors.error,
+                              fontSize: 12,
+                            ),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                        ),
+                      ),
+                    const Spacer(),
+                    HoverWidget(
+                      scale: 1.05,
+                      child: OutlinedButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppColors.divider),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                        ),
+                        child: Text(
+                          'Batal',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.error,
-                          fontWeight: FontWeight.w500,
+                    HoverWidget(
+                      enableGlow: false,
+                      glowColor: AppColors.primary,
+                      scale: 1.05,
+                      borderRadius: BorderRadius.circular(10),
+                      child: ElevatedButton(
+                        onPressed: _isLoading || _pendingImageBytes == null
+                            ? null
+                            : _saveAvatar,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: AppColors.background,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                'Simpan Foto',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.background,
+                                  fontSize: 13,
+                                ),
+                              ),
                       ),
                     ),
                   ],
                 ),
               ),
-
-            // ── Tabs ─────────────────────────────────────────────
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              height: 38,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.divider, width: 0.5),
-              ),
-              child: TabBar(
-                controller: _tabController,
-                indicator: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: AppColors.primary,
-                ),
-                indicatorSize: TabBarIndicatorSize.tab,
-                labelColor: AppColors.background,
-                unselectedLabelColor: AppColors.textMuted,
-                labelStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                tabs: const [
-                  Tab(
-                    iconMargin: EdgeInsets.zero,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.face_rounded, size: 15),
-                          SizedBox(width: 5),
-                          Text('Pilihan Karakter'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Tab(
-                    iconMargin: EdgeInsets.zero,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.upload_rounded, size: 15),
-                          SizedBox(width: 5),
-                          Text('Unggah / URL'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Tab Views ────────────────────────────────────────
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  // Tab 1: Presets
-                  _buildPresetsGrid(),
-
-                  // Tab 2: Upload & Custom URL
-                  _buildUploadAndUrlTab(),
-                ],
-              ),
-            ),
-
-            Divider(height: 1, color: AppColors.divider),
-
-            // ── Footer Actions ───────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  if (widget.user?.avatarUrl != null)
-                    HoverWidget(
-                      scale: 1.05,
-                      child: TextButton.icon(
-                        onPressed: _isLoading ? null : _removeAvatar,
-                        icon: Icon(
-                          Icons.delete_outline_rounded,
-                          size: 16,
-                          color: AppColors.error,
-                        ),
-                        label: Text(
-                          'Hapus',
-                          style: TextStyle(
-                            color: AppColors.error,
-                            fontSize: 12,
-                          ),
-                        ),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                        ),
-                      ),
-                    ),
-                  const Spacer(),
-                  HoverWidget(
-                    scale: 1.05,
-                    child: OutlinedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: AppColors.divider),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                      ),
-                      child: Text(
-                        'Batal',
-                        style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  HoverWidget(
-                    enableGlow: false,
-                    glowColor: AppColors.primary,
-                    scale: 1.05,
-                    borderRadius: BorderRadius.circular(10),
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _saveAvatar,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: AppColors.background,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              'Simpan Foto',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.background,
-                                fontSize: 13,
-                              ),
-                            ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -675,9 +474,10 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
       );
     }
 
-    if (_selectedAvatarUrl != null && _selectedAvatarUrl!.isNotEmpty) {
+    final currentAvatarUrl = widget.user?.avatarUrl;
+    if (currentAvatarUrl != null && currentAvatarUrl.isNotEmpty) {
       return ProxiedImage(
-        imageUrl: _selectedAvatarUrl!,
+        imageUrl: currentAvatarUrl,
         width: 76,
         height: 76,
         fit: BoxFit.cover,
@@ -706,278 +506,78 @@ class _ChangeAvatarDialogState extends ConsumerState<ChangeAvatarDialog>
     );
   }
 
-  Widget _buildPresetsGrid() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isMobile = constraints.maxWidth < 440;
-        final crossAxisCount = isMobile ? 3 : 4;
-        final avatarSize = isMobile ? 44.0 : 48.0;
-
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          itemCount: _presets.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: isMobile ? 0.72 : 0.74,
-          ),
-          itemBuilder: (context, index) {
-            final preset = _presets[index];
-            final isSelected =
-                _pendingImageBytes == null &&
-                _selectedAvatarUrl == preset['url'];
-
-            return HoverWidget(
-              scale: 1.06,
-              borderRadius: BorderRadius.circular(12),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () {
-                    setState(() {
-                      _pendingImageBytes = null;
-                      _selectedAvatarUrl = preset['url'];
-                      _urlController.clear();
-                    });
-                  },
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppColors.primary.withValues(alpha: 0.15)
-                          : AppColors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected
-                            ? AppColors.primary
-                            : AppColors.divider,
-                        width: isSelected ? 2 : 0.5,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Container(
-                              width: avatarSize,
-                              height: avatarSize,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppColors.card,
-                                border: Border.all(
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : AppColors.divider,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: ClipOval(
-                                child: ProxiedImage(
-                                  imageUrl: preset['url']!,
-                                  width: avatarSize,
-                                  height: avatarSize,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                            if (isSelected)
-                              Positioned(
-                                right: -2,
-                                bottom: -2,
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.check_rounded,
-                                    size: 11,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Flexible(
-                          child: Text(
-                            preset['name']!,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              color: isSelected
-                                  ? AppColors.primary
-                                  : AppColors.textPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                        Flexible(
-                          child: Text(
-                            preset['role']!,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: AppColors.textMuted,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildUploadAndUrlTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+  Widget _buildImagePicker() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Upload from Device ──────────────────────────────
           Text(
-            'Unggah Foto dari Perangkat',
+            'Pilih sumber foto',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: FontWeight.w700,
               color: AppColors.textPrimary,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            'Pilih foto atau gambar dari komputer / galeri HP kamu (JPG, PNG, WebP)',
-            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+            'Ambil foto langsung atau pilih gambar yang sudah ada di galeri.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
-          const SizedBox(height: 10),
-          HoverWidget(
-            scale: 1.02,
-            borderRadius: BorderRadius.circular(10),
-            child: OutlinedButton.icon(
-              onPressed: _isLoading ? null : _showImageSourceSheet,
-              icon: Icon(
-                Icons.add_a_photo_outlined,
-                color: AppColors.primary,
-                size: 18,
-              ),
-              label: Text(
-                _pendingImageBytes != null
-                    ? 'Ganti Foto Terpilih'
-                    : 'Ambil atau Pilih Foto',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                side: BorderSide(color: AppColors.primary),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
-          ),
-
           const SizedBox(height: 20),
           Row(
             children: [
-              Expanded(child: Divider(color: AppColors.divider)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'ATAU TEMPEL URL',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                    color: AppColors.textMuted,
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading
+                      ? null
+                      : () => _handlePickImage(ImageSource.camera),
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: const Text('Kamera'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ),
-              Expanded(child: Divider(color: AppColors.divider)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading
+                      ? null
+                      : () => _handlePickImage(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Galeri'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          // ── Direct URL ──────────────────────────────────────
-          Text(
-            'Gunakan Link / URL Gambar',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Tempel tautan gambar dari internet (Pinterest, Discord, Imgur, dll)',
-            style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _urlController,
-            style: const TextStyle(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'https://example.com/foto.jpg',
-              hintStyle: TextStyle(fontSize: 12, color: AppColors.textMuted),
-              prefixIcon: const Icon(Icons.link_rounded, size: 18),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-              suffixIcon: HoverWidget(
-                scale: 1.15,
-                child: IconButton(
-                  icon: Icon(
-                    Icons.check_circle_rounded,
-                    color: AppColors.primary,
-                    size: 20,
-                  ),
-                  tooltip: 'Terapkan Link',
-                  onPressed: () {
-                    final url = _urlController.text.trim();
-                    if (url.isNotEmpty) {
-                      setState(() {
-                        _pendingImageBytes = null;
-                        _selectedAvatarUrl = url;
-                      });
-                    }
-                  },
+          if (_pendingImageBytes != null) ...[
+            const SizedBox(height: 14),
+            Center(
+              child: Text(
+                'Foto siap diunggah',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            onChanged: (val) {
-              if (val.trim().isNotEmpty) {
-                setState(() {
-                  _pendingImageBytes = null;
-                  _selectedAvatarUrl = val.trim();
-                });
-              }
-            },
-          ),
+          ],
         ],
       ),
     );

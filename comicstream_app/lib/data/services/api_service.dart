@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart';
 import '../models/comic.dart';
 import '../models/chapter.dart';
 import '../models/comic_page.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/services/app_logger.dart';
 
 /// Service untuk mengambil data komik dari mangamint API (febryardiansyah/manga-api)
 /// Base URL: https://mangamint.kaedenoki.net/api
@@ -54,22 +54,45 @@ class MangaApiService {
           ),
         );
 
-    if (kDebugMode) {
-      _dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            debugPrint('MANGA API → ${options.method} ${options.path}');
-            return handler.next(options);
-          },
-          onError: (error, handler) {
-            debugPrint(
-              'MANGA API ✖ ${error.response?.statusCode} ${error.message}',
-            );
-            return handler.next(error);
-          },
-        ),
-      );
-    }
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          options.extra['yomuLogTimer'] = Stopwatch()..start();
+          AppLogger.info(
+            'Fallback API request',
+            detail: '${options.method} ${options.uri.path}',
+          );
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          final timer = response.requestOptions.extra['yomuLogTimer'];
+          final elapsed = timer is Stopwatch ? timer.elapsedMilliseconds : null;
+          AppLogger.info(
+            'Fallback API response',
+            detail:
+                '${response.requestOptions.method} '
+                '${response.requestOptions.uri.path} '
+                'status=${response.statusCode ?? 0}'
+                '${elapsed == null ? '' : ' durationMs=$elapsed'}',
+          );
+          handler.next(response);
+        },
+        onError: (error, handler) {
+          final timer = error.requestOptions.extra['yomuLogTimer'];
+          final elapsed = timer is Stopwatch ? timer.elapsedMilliseconds : null;
+          AppLogger.error(
+            'Fallback API request failed',
+            error: error,
+            detail:
+                '${error.requestOptions.method} '
+                '${error.requestOptions.uri.path} '
+                'status=${error.response?.statusCode ?? 'network'}'
+                '${elapsed == null ? '' : ' durationMs=$elapsed'}',
+          );
+          handler.next(error);
+        },
+      ),
+    );
   }
 
   // ── Comics List ───────────────────────────────────────────
@@ -216,7 +239,10 @@ class MangaApiService {
           data['thumb']?.toString() ?? data['cover_url']?.toString() ?? '';
       return coverUrl.isEmpty ? null : coverUrl;
     } catch (e) {
-      debugPrint('[Manga API] cover lookup failed for $endpoint: $e');
+      AppLogger.warning(
+        'Comic cover lookup failed',
+        detail: 'errorType=${e.runtimeType}',
+      );
       return null;
     }
   }
@@ -233,8 +259,8 @@ class MangaApiService {
       final body = error.response?.data;
       final message = body is Map ? body['message']?.toString() ?? '' : '';
       throw ChapterSourceException(
-        accessDenied: error.response?.statusCode == 403 ||
-            message.contains('HTTP 403'),
+        accessDenied:
+            error.response?.statusCode == 403 || message.contains('HTTP 403'),
       );
     }
     final data = response.data is Map
@@ -356,12 +382,19 @@ class SupabaseComicService {
           .order('updated_at', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
-      debugPrint('[Supabase] getLatestManga: ${response.length} komik');
+      AppLogger.info(
+        'Supabase latest comics loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getLatestManga: $e\n$st');
+      AppLogger.error(
+        'Supabase latest comics failed',
+        error: e,
+        stackTrace: st,
+      );
       return [];
     }
   }
@@ -376,12 +409,19 @@ class SupabaseComicService {
           .order('view_count', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
-      debugPrint('[Supabase] getPopularManga: ${response.length} komik');
+      AppLogger.info(
+        'Supabase popular comics loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getPopularManga: $e\n$st');
+      AppLogger.error(
+        'Supabase popular comics failed',
+        error: e,
+        stackTrace: st,
+      );
       return [];
     }
   }
@@ -419,7 +459,7 @@ class SupabaseComicService {
         ),
       ];
     } catch (e) {
-      debugPrint('[Supabase] merge admin comics failed: $e');
+      AppLogger.error('Admin comic merge failed', error: e);
       return apiComics;
     }
   }
@@ -538,12 +578,15 @@ class SupabaseComicService {
           .order('updated_at', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
-      debugPrint('[Supabase] getManhwa: ${response.length} komik');
+      AppLogger.info(
+        'Supabase manhwa loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getManhwa: $e\n$st');
+      AppLogger.error('Supabase manhwa load failed', error: e, stackTrace: st);
       return [];
     }
   }
@@ -558,12 +601,15 @@ class SupabaseComicService {
           .order('updated_at', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
-      debugPrint('[Supabase] getManga: ${response.length} komik');
+      AppLogger.info(
+        'Supabase manga loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getManga: $e\n$st');
+      AppLogger.error('Supabase manga load failed', error: e, stackTrace: st);
       return [];
     }
   }
@@ -578,12 +624,15 @@ class SupabaseComicService {
           .order('updated_at', ascending: false)
           .range((page - 1) * 20, page * 20 - 1);
 
-      debugPrint('[Supabase] getManhua: ${response.length} komik');
+      AppLogger.info(
+        'Supabase manhua loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getManhua: $e\n$st');
+      AppLogger.error('Supabase manhua load failed', error: e, stackTrace: st);
       return [];
     }
   }
@@ -598,12 +647,19 @@ class SupabaseComicService {
           .order('updated_at', ascending: false)
           .limit(10);
 
-      debugPrint('[Supabase] getRecommended: ${response.length} komik');
+      AppLogger.info(
+        'Supabase recommendations loaded',
+        detail: 'count=${response.length}',
+      );
       return (response as List)
           .map((json) => Comic.fromSupabase(json))
           .toList();
     } catch (e, st) {
-      debugPrint('[Supabase ERROR] getRecommended: $e\n$st');
+      AppLogger.error(
+        'Supabase recommendations failed',
+        error: e,
+        stackTrace: st,
+      );
       return [];
     }
   }

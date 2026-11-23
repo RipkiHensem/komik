@@ -44,12 +44,42 @@ memakai **email dan password**. Untuk menutup fungsi pencarian email dari
 username yang lama, jalankan [SQL keamanan P8](supabase_security_p8.sql)
 sekali pada proyek Supabase yang sama.
 
-**Deploy demo:** APK di atas memakai tanda tangan debug dan cocok untuk
-demonstrasi di HP. Build `release` sengaja belum diberi kunci; jangan
-distribusikan ke pengguna umum atau Play Store sebelum menyiapkan keystore
-rilis dan proses penyimpanan secret yang aman. Pada pull request, workflow
-`P8 Flutter verification` menjalankan analisis, seluruh unit test, dan build
-APK debug; unduh paketnya dari artifact `yomu-debug-apk` pada run CI.
+## APK Release dan log saat aplikasi berjalan (P11)
+
+Untuk demo di HP, siapkan APK **Release** dengan skrip PowerShell ini dari root
+repo:
+
+```powershell
+cd comicstream_app
+.\tool\build_release_demo.ps1
+```
+
+Skrip membangun mode Release, menandatangani APK dengan debug keystore lokal,
+lalu memverifikasi tanda tangannya. Hasilnya ada di
+`comicstream_app/build/app/outputs/flutter-apk/yomu-release-demo.apk`.
+Kirim APK itu ke HP dan buka untuk memasang. APK ini bukan build Debug, tetapi
+tanda tangannya memang khusus demo/instalasi lokal; siapkan keystore rilis
+sendiri sebelum distribusi publik atau Play Store. Jangan kirim file
+`debug.keystore` ke GitHub atau orang lain.
+
+Log runtime aman memakai prefix `[YOMU]`; log mencatat tahap API, status,
+durasi, dan jenis error tanpa mencatat isi komentar, kredensial, token, atau
+body request. Untuk mengambil log dari HP yang tersambung USB (atau ADB
+wireless), jalankan di PowerShell:
+
+```powershell
+adb logcat -c
+adb logcat | Select-String '\[YOMU\]' | Tee-Object -FilePath .\yomu-runtime.log
+```
+
+Lakukan langkah yang bermasalah di aplikasi, lalu tekan `Ctrl+C`. File
+`yomu-runtime.log` berisi baris Yomu yang tersaring; tinjau sebelum dibagikan.
+Dokumentasi 11 bug/issue yang sudah dibuat di GitHub, status perbaikannya, dan
+langkah reproduksi ada di [POST_DEPLOY_BUGS.md](POST_DEPLOY_BUGS.md), dengan
+tautan ke issue #4 sampai #14.
+
+Pada pull request, workflow `P8 Flutter verification` menjalankan analisis,
+unit test, dan build APK debug; unduh paket CI dari artifact `yomu-debug-apk`.
 
 Lihat [bukti P8, hasil review keamanan, dan log aman](P8_VERIFICATION.md).
 Langkah demonstrasi P6/P7 ada di [P6_P7_MVP.md](P6_P7_MVP.md).

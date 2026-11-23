@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user.dart';
@@ -16,6 +16,7 @@ import '../services/shinigami_api_service.dart';
 import '../services/auth_service.dart';
 import '../repositories/comic_caption_repository.dart';
 import '../repositories/popular_repository.dart';
+import '../../core/services/app_logger.dart';
 
 // ── Service Providers ───────────────────────────────────────
 
@@ -441,7 +442,10 @@ class HomeComicsNotifier extends StateNotifier<HomeComicsState> {
       raw = await _liveApi.getLatestManga(page: page, format: _format);
       fromLive = true;
     } catch (e) {
-      debugPrint('[HomeComics] Live API error: $e');
+      AppLogger.warning(
+        'Live catalog request failed',
+        detail: 'errorType=${e.runtimeType}',
+      );
     }
 
     if (!fromLive || raw.isEmpty) {
@@ -511,7 +515,10 @@ final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
     // "Comic not found" adalah expected untuk komik dari API eksternal — jangan print
     final msg = e.toString();
     if (!msg.contains('Comic not found in Supabase')) {
-      debugPrint('[Supabase] no managed detail for $endpoint: $e');
+      AppLogger.warning(
+        'Managed comic detail unavailable',
+        detail: 'errorType=${e.runtimeType}',
+      );
     }
   }
 
@@ -527,7 +534,10 @@ final comicDetailProvider = FutureProvider.family<Map<String, dynamic>, String>(
       return dbApi.filterHiddenChapters(detail);
     }
   } catch (e) {
-    debugPrint('[Live API Fallback] comicDetail: $e');
+    AppLogger.warning(
+      'Live comic detail request failed',
+      detail: 'errorType=${e.runtimeType}',
+    );
     if (managedDetail == null) rethrow;
   }
 
@@ -550,7 +560,10 @@ final comicFromDetailProvider = FutureProvider.family<Comic, String>((
         .getCaption(endpoint);
     return caption == null ? comic : comic.withSynopsis(caption);
   } catch (error) {
-    debugPrint('[Comic caption] Override unavailable for $endpoint: $error');
+    AppLogger.warning(
+      'Comic caption override unavailable',
+      detail: 'errorType=${error.runtimeType}',
+    );
     return comic;
   }
 });
@@ -581,7 +594,10 @@ final chapterPagesProvider = FutureProvider.family<List<ComicPage>, String>((
     if (pages.isNotEmpty) return pages;
   } catch (e) {
     sourceError = e;
-    debugPrint('[Live API Fallback] chapterPages: $e');
+    AppLogger.warning(
+      'Live chapter pages request failed',
+      detail: 'errorType=${e.runtimeType}',
+    );
   }
   try {
     final backup = await dbApi.getChapterPages(chapterEndpoint);
@@ -735,7 +751,8 @@ class HistoryNotifier extends StateNotifier<AsyncValue<List<Bookmark>>> {
     if (_loadChapters == null) return;
     final resolved = await Future.wait(
       history.map((item) async {
-        if (item.chapterLabel != null || item.lastChapterId == null) return item;
+        if (item.chapterLabel != null || item.lastChapterId == null)
+          return item;
         try {
           final chapters = await _loadChapters(item.comicId);
           for (final chapter in chapters) {
@@ -1006,7 +1023,10 @@ final searchComicsProvider = FutureProvider<List<Comic>>((ref) async {
         list = await api.search(searchState.query.trim());
       }
     } catch (e) {
-      debugPrint('[Live API Fallback] search: $e');
+      AppLogger.warning(
+        'Live comic search failed',
+        detail: 'errorType=${e.runtimeType}',
+      );
       list = await api.search(searchState.query.trim());
     }
   } else if (searchState.selectedGenres.isNotEmpty) {
@@ -1136,6 +1156,11 @@ class BrowseNotifier extends StateNotifier<BrowseState> {
     await _fetchPage(state.currentPage + 1, _generation, _filter);
   }
 
+  void clear() {
+    _generation++;
+    state = const BrowseState();
+  }
+
   Future<ComicCatalogPage> _sourcePage(int page, SearchState filter) async {
     if (_shinigami != null) {
       return _shinigami.catalogPage(
@@ -1221,6 +1246,16 @@ class BrowseNotifier extends StateNotifier<BrowseState> {
       if (filter.sortBy == 'rating') {
         comics.sort((a, b) => b.rating.compareTo(a.rating));
       }
+      if (filter.sortBy == 'latest') {
+        comics.sort((a, b) {
+          final aTime = a.updatedAt;
+          final bTime = b.updatedAt;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
+      }
       state = BrowseState(
         comics: comics,
         currentPage: lastPage,
@@ -1278,7 +1313,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
       state = AsyncValue.data(list);
     } catch (e) {
       // Table belum ada atau error lain → tampilkan kosong
-      debugPrint('[Comments] load error: $e');
+      AppLogger.error('Comic comments load failed', error: e);
       state = const AsyncValue.data([]);
     }
   }
@@ -1302,7 +1337,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
       });
       await loadComments();
     } catch (e) {
-      debugPrint('[Comments] post error: $e');
+      AppLogger.error('Comic comment post failed', error: e);
       // Optimistic local insert so user sees their comment immediately
       final optimistic = Comment(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -1325,7 +1360,7 @@ class CommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data(current.where((c) => c.id != commentId).toList());
     } catch (e) {
-      debugPrint('[Comments] delete error: $e');
+      AppLogger.error('Comic comment delete failed', error: e);
     }
   }
 }
@@ -1365,7 +1400,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
           .toList();
       state = AsyncValue.data(list);
     } catch (e) {
-      debugPrint('[ChapterComments] load error: $e');
+      AppLogger.error('Chapter comments load failed', error: e);
       state = const AsyncValue.data([]);
     }
   }
@@ -1389,7 +1424,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
       });
       await loadComments();
     } catch (e) {
-      debugPrint('[ChapterComments] post error: $e');
+      AppLogger.error('Chapter comment post failed', error: e);
       // Optimistic local insert so user sees their comment immediately
       final optimistic = Comment(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -1412,7 +1447,7 @@ class ChapterCommentsNotifier extends StateNotifier<AsyncValue<List<Comment>>> {
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data(current.where((c) => c.id != commentId).toList());
     } catch (e) {
-      debugPrint('[ChapterComments] delete error: $e');
+      AppLogger.error('Chapter comment delete failed', error: e);
     }
   }
 }

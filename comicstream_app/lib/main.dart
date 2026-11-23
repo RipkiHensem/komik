@@ -1,13 +1,32 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/constants/app_constants.dart';
 import 'core/services/notification_service.dart';
+import 'core/services/app_logger.dart';
 import 'app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  FlutterError.onError = (details) {
+    AppLogger.error(
+      'Flutter framework exception',
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stackTrace) {
+    AppLogger.error(
+      'Unhandled platform exception',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    return true;
+  };
 
   // Initialize Supabase
   await Supabase.initialize(
@@ -18,7 +37,10 @@ void main() async {
   try {
     await NotificationService.instance.initialize();
   } catch (error) {
-    debugPrint('Notification initialization failed: $error');
+    AppLogger.warning(
+      'Notification initialization failed',
+      detail: 'errorType=${error.runtimeType}',
+    );
   }
 
   // Set preferred orientations

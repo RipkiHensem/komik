@@ -18,7 +18,7 @@ class ComicCard extends ConsumerStatefulWidget {
     super.key,
     required this.comic,
     this.onTap,
-    this.showBadge = true,
+    this.showBadge = false,
   });
 
   @override

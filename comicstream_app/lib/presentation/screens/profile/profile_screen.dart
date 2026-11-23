@@ -43,8 +43,11 @@ class ProfileScreen extends ConsumerWidget {
                               MouseRegion(
                                 cursor: SystemMouseCursors.click,
                                 child: GestureDetector(
-                                  onTap: () =>
-                                      ChangeAvatarDialog.show(context, user),
+                                  onTap: () => _showAvatarPreview(
+                                    context,
+                                    imageUrl: user.avatarUrl,
+                                    username: user.username,
+                                  ),
                                   child: Container(
                                     width: 88,
                                     height: 88,
@@ -318,7 +321,7 @@ class ProfileScreen extends ConsumerWidget {
                     _buildMenuItem(
                       icon: Icons.account_circle_rounded,
                       title: 'Ganti Foto Profil',
-                      subtitle: 'Pilih karakter anime, unggah foto, atau link',
+                      subtitle: 'Ambil foto atau pilih dari galeri',
                       onTap: () => ChangeAvatarDialog.show(context, user),
                     ),
                   _buildMenuItem(
@@ -613,11 +616,11 @@ class ProfileScreen extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Tutup',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                        color: AppColors.isDark ? Colors.black : Colors.white,
                       ),
                     ),
                   ),
@@ -758,3 +761,69 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 }
+
+void _showAvatarPreview(
+  BuildContext context, {
+  required String? imageUrl,
+  required String username,
+}) {
+  final initial = username.isNotEmpty ? username[0].toUpperCase() : 'U';
+  final previewSize = (MediaQuery.sizeOf(context).width * 0.78)
+      .clamp(220.0, 360.0)
+      .toDouble();
+
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: AppColors.surface,
+      insetPadding: const EdgeInsets.all(24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: SizedBox(
+        width: previewSize,
+        height: previewSize,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: ClipOval(
+                child: imageUrl != null && imageUrl.isNotEmpty
+                    ? ProxiedImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        errorWidget: _largeAvatarInitial(initial),
+                      )
+                    : _largeAvatarInitial(initial),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton.filled(
+                tooltip: 'Tutup foto',
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.65),
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _largeAvatarInitial(String initial) => ColoredBox(
+  color: AppColors.primarySurface,
+  child: Center(
+    child: Text(
+      initial,
+      style: const TextStyle(
+        fontSize: 96,
+        fontWeight: FontWeight.w800,
+        color: Colors.white,
+      ),
+    ),
+  ),
+);

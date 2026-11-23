@@ -37,6 +37,7 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
   bool _isSendingComment = false;
   bool _isSavingSynopsis = false;
   bool _isSavingBookmark = false;
+  String? _expandedSynopsisFor;
   String _searchQuery = '';
   bool _isAscending = false;
   bool _isExactMatch = false;
@@ -862,17 +863,67 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
-                              child: Text(
-                                _isMissingSynopsis(comic.synopsis)
-                                    ? 'Belum ada sinopsis.'
-                                    : comic.synopsis,
-                                maxLines: 4,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.textSecondary,
-                                  height: 1.6,
-                                ),
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final synopsis = _isMissingSynopsis(
+                                    comic.synopsis,
+                                  )
+                                      ? 'Belum ada sinopsis.'
+                                      : comic.synopsis;
+                                  final style = TextStyle(
+                                    fontSize: 13,
+                                    color: AppColors.textSecondary,
+                                    height: 1.6,
+                                  );
+                                  final textPainter = TextPainter(
+                                    text: TextSpan(
+                                      text: synopsis,
+                                      style: style,
+                                    ),
+                                    maxLines: 4,
+                                    textDirection: Directionality.of(context),
+                                  )..layout(maxWidth: constraints.maxWidth);
+                                  final canExpand =
+                                      textPainter.didExceedMaxLines;
+                                  final isExpanded =
+                                      _expandedSynopsisFor == comic.id;
+
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        synopsis,
+                                        maxLines: isExpanded ? null : 4,
+                                        overflow: isExpanded
+                                            ? TextOverflow.clip
+                                            : TextOverflow.ellipsis,
+                                        style: style,
+                                      ),
+                                      if (canExpand)
+                                        TextButton(
+                                          onPressed: () => setState(() {
+                                            _expandedSynopsisFor = isExpanded
+                                                ? null
+                                                : comic.id;
+                                          }),
+                                          style: TextButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 4,
+                                            ),
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                          ),
+                                          child: Text(
+                                            isExpanded
+                                                ? 'Tutup'
+                                                : 'Baca selengkapnya',
+                                          ),
+                                        ),
+                                    ],
+                                  );
+                                },
                               ),
                             ),
                             if (isAdmin)
@@ -1203,32 +1254,47 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: TextField(
-                    controller: _commentController,
-                    focusNode: _commentFocus,
-                    maxLines: 4,
-                    minLines: 1,
-                    enabled: isLoggedIn,
-                    textInputAction: TextInputAction.newline,
-                    onTap: () => setState(() {}),
-                    onChanged: (_) => setState(() {}),
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textPrimary,
-                      height: 1.45,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: isLoggedIn
-                          ? 'Tulis komentar kamu...'
-                          : 'Masuk untuk menulis komentar',
-                      hintStyle: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Dilarang spoiler',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                      const SizedBox(height: 3),
+                      TextField(
+                        controller: _commentController,
+                        focusNode: _commentFocus,
+                        maxLines: 4,
+                        minLines: 1,
+                        enabled: isLoggedIn,
+                        textInputAction: TextInputAction.newline,
+                        onTap: () => setState(() {}),
+                        onChanged: (_) => setState(() {}),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textPrimary,
+                          height: 1.45,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: isLoggedIn
+                              ? 'Tulis komentar kamu...'
+                              : 'Masuk untuk menulis komentar',
+                          hintStyle: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textMuted,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),

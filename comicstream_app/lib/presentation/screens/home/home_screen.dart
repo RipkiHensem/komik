@@ -44,6 +44,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       popularComicsByFormatProvider(_selectedFormat),
     );
     final homeComicsState = ref.watch(homeComicsProvider(_selectedFormat));
+    final firstPageLatestIds = homeComicsState.comics
+        .take(_latestPageSize)
+        .map((comic) => comic.id)
+        .toSet();
     final authUser = ref.watch(authProvider).user;
     final screenWidth = MediaQuery.of(context).size.width;
     final appWidth = screenWidth.clamp(0.0, _mobileAppMaxWidth);
@@ -235,15 +239,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       tag: _selectedFormat != null
                           ? _selectedFormat!.toUpperCase()
                           : 'HOT',
-                      onSeeAll: () {
-                        ref
-                            .read(searchStateProvider.notifier)
-                            .state = SearchState(
-                          sortBy: 'popular',
-                          selectedFormat: _selectedFormat,
-                        );
-                        context.go('/search');
-                      },
                     ),
                   ),
 
@@ -271,7 +266,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   SliverToBoxAdapter(
                     child: popularComics.when(
                       data: (comics) =>
-                          _buildHorizontalList(comics.take(7).toList()),
+                          _buildHorizontalList(
+                            comics.take(7).toList(),
+                            firstPageLatestIds,
+                          ),
                       loading: () => _buildHorizontalShimmer(),
                       error: (error, _) => ErrorView(
                         message: 'Gagal memuat komik populer',
@@ -289,15 +287,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ? 'Update $_selectedFormat Terbaru'
                           : 'Update Terbaru',
                       tag: _selectedFormat == null ? 'LIVE' : null,
-                      onSeeAll: () {
-                        ref
-                            .read(searchStateProvider.notifier)
-                            .state = SearchState(
-                          sortBy: 'latest',
-                          selectedFormat: _selectedFormat,
-                        );
-                        context.go('/search');
-                      },
                     ),
                   ),
                   if (homeComicsState.isLoading &&
@@ -319,6 +308,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           .skip(_latestPage * _latestPageSize)
                           .take(_latestPageSize)
                           .toList(),
+                      showNewBadges: _latestPage == 0,
                     ),
                     SliverToBoxAdapter(
                       child: _buildLatestPagination(homeComicsState),
@@ -380,7 +370,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// Horizontal scrollable comic list (limited to max 7 comics)
-  Widget _buildHorizontalList(List<Comic> comics) {
+  Widget _buildHorizontalList(
+    List<Comic> comics,
+    Set<String> firstPageLatestIds,
+  ) {
     final displayComics = comics.take(7).toList();
     if (displayComics.isEmpty) {
       return Padding(
@@ -410,6 +403,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               width: 150,
               child: ComicCard(
                 comic: displayComics[index],
+                showBadge: firstPageLatestIds.contains(
+                  displayComics[index].id,
+                ),
                 onTap: () => context.push('/comic/${displayComics[index].id}'),
               ),
             ),
@@ -420,7 +416,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// Two-card grid with a capped width so the right side stays open.
-  Widget _buildComicGrid(List<Comic> comics) {
+  Widget _buildComicGrid(
+    List<Comic> comics, {
+    required bool showNewBadges,
+  }) {
     if (comics.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
@@ -454,6 +453,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               itemCount: comics.length,
               itemBuilder: (context, index) => ComicCard(
                 comic: comics[index],
+                showBadge: showNewBadges,
                 onTap: () => context.push('/comic/${comics[index].id}'),
               ),
             ),

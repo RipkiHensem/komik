@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/app_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/comic.dart';
@@ -232,7 +233,10 @@ class _AdminChaptersDialogState extends ConsumerState<AdminChaptersDialog> {
     try {
       saved = await db.getAdminComicChapters(widget.comic.id);
     } catch (error) {
-      debugPrint('[Admin] saved chapters unavailable: $error');
+      AppLogger.warning(
+        'Saved admin chapters unavailable',
+        detail: 'errorType=${error.runtimeType}',
+      );
     }
     List<Chapter> chapters = saved;
     try {
@@ -245,7 +249,10 @@ class _AdminChaptersDialogState extends ConsumerState<AdminChaptersDialog> {
       chapters = byId.values.toList()
         ..sort((a, b) => b.chapterNumber.compareTo(a.chapterNumber));
     } catch (error) {
-      debugPrint('[Admin] chapter API unavailable: $error');
+      AppLogger.warning(
+        'Admin chapter source unavailable',
+        detail: 'errorType=${error.runtimeType}',
+      );
     }
     final hiddenIds = await db.getHiddenChapterIds();
     return chapters
@@ -416,7 +423,12 @@ Future<Map<String, dynamic>?> showComicEditor(
 }
 
 class ComicEditorDialog extends StatefulWidget {
-  const ComicEditorDialog({super.key, this.comic, this.initialPopular, this.initialChapterCount = 0});
+  const ComicEditorDialog({
+    super.key,
+    this.comic,
+    this.initialPopular,
+    this.initialChapterCount = 0,
+  });
   final bool? initialPopular;
   final Comic? comic;
   final int initialChapterCount;

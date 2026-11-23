@@ -535,22 +535,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _scheduleProgressSave(index + 1);
       },
       itemBuilder: (context, index) {
-        return InteractiveViewer(
-          minScale: 1.0,
-          maxScale: 3.0,
-          child: Center(
-            child: SizedBox(
-              width: readerWidth,
-              child: ProxiedImage(
-                imageUrl: pages[index].imageUrl,
-                fit: BoxFit.contain,
-                cacheWidth:
-                    (readerWidth * MediaQuery.devicePixelRatioOf(context))
-                        .round(),
-                cacheHeight: _maxReaderImageDecodeHeight,
-                filterQuality: FilterQuality.low,
-                gaplessPlayback: true,
-              ),
+        return Center(
+          child: SizedBox(
+            width: readerWidth,
+            child: ProxiedImage(
+              imageUrl: pages[index].imageUrl,
+              fit: BoxFit.contain,
+              cacheWidth: (readerWidth * MediaQuery.devicePixelRatioOf(context))
+                  .round(),
+              cacheHeight: _maxReaderImageDecodeHeight,
+              filterQuality: FilterQuality.low,
+              gaplessPlayback: true,
             ),
           ),
         );
