@@ -400,15 +400,14 @@ Future<Map<String, dynamic>?> showComicEditor(
           .any((item) => item.id == comic.id);
       final chapters = results[2] as List<Chapter>;
       if (chapters.isNotEmpty) chapterCount = chapters.length;
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Gagal memeriksa daftar populer. Coba lagi.'),
-          ),
-        );
-      }
-      return null;
+    } catch (error) {
+      // The editor must remain usable when optional stats/chapter lookups fail.
+      // Fall back to the comic metadata already loaded on screen.
+      selected ??= comic.isPopular;
+      AppLogger.warning(
+        'Admin comic editor preload failed; opening with cached values',
+        detail: 'errorType=${error.runtimeType}',
+      );
     }
   }
   if (!context.mounted) return null;

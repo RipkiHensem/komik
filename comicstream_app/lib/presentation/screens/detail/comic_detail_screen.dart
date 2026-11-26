@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../widgets/comic_cover.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/providers/providers.dart';
@@ -50,6 +51,91 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
     await _saveMetadata(
       () => ref.read(supabaseComicServiceProvider).saveAdminComic(values),
     );
+  }
+
+  Future<void> _rateComic(Comic comic, int? currentRating) async {
+    if (ref.read(authProvider).user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Masuk untuk memberi rating komik.'),
+          action: SnackBarAction(
+            label: 'Masuk',
+            onPressed: () => context.push('/login'),
+          ),
+        ),
+      );
+      return;
+    }
+
+    var selectedRating = currentRating ?? 5;
+    final rating = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Beri rating komik'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('$selectedRating dari 10'),
+              const SizedBox(height: 8),
+              Row(
+                children: List.generate(10, (index) {
+                  final value = index + 1;
+                  return Expanded(
+                    child: IconButton(
+                      tooltip: '$value dari 10',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      onPressed: () =>
+                          setDialogState(() => selectedRating = value),
+                      icon: Icon(
+                        value <= selectedRating
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        size: 22,
+                        color: AppColors.warning,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, selectedRating),
+              child: const Text('Simpan'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (rating == null || !mounted) return;
+
+    try {
+      await ref.read(comicEngagementRepositoryProvider).rate(comic.id, rating);
+      ref.invalidate(comicEngagementProvider(widget.comicId));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Rating komik berhasil disimpan.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is PostgrestException
+                ? 'Rating belum tersedia di server. Perbarui skema Supabase lalu coba lagi.'
+                : 'Gagal menyimpan rating. Periksa koneksi lalu coba lagi.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _editChapter(Chapter chapter) async {
@@ -411,6 +497,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
         bookmarks.valueOrNull?.any((item) => item.comicId == widget.comicId) ??
         false;
     final comicAsync = ref.watch(comicFromDetailProvider(widget.comicId));
+    final engagementAsync = ref.watch(comicEngagementProvider(widget.comicId));
+    final engagement = engagementAsync.valueOrNull;
     final chaptersAsync = ref.watch(comicChaptersProvider(widget.comicId));
     final readChapters = ref.watch(readChaptersProvider(widget.comicId));
     final isAdmin = ref.watch(isAdminProvider).valueOrNull == true;
@@ -538,21 +626,50 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                                       // Rating & View count chips
                                       Row(
                                         children: [
-                                          _statChip(
-                                            Icons.star_rounded,
-                                            comic.rating.toStringAsFixed(1),
-                                            AppColors.warning,
+                                          Tooltip(
+                                            message:
+                                                engagement?.userRating == null
+                                                ? 'Ketuk untuk memberi rating 1–10'
+                                                : 'Rating kamu ${engagement!.userRating}/10 · ketuk untuk mengubah',
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              onTap: () => _rateComic(
+                                                comic,
+                                                engagement?.userRating,
+                                              ),
+                                              child: _statChip(
+                                                Icons.star_rounded,
+                                                engagement == null ||
+                                                        engagement
+                                                                .ratingCount ==
+                                                            0
+                                                    ? (engagementAsync.isLoading
+                                                          ? '…'
+                                                          : '—')
+                                                    : '${engagement.ratingAverage.toStringAsFixed(1)} (${engagement.ratingCount})',
+                                                AppColors.warning,
+                                              ),
+                                            ),
                                           ),
                                           const SizedBox(width: 12),
                                           _statChip(
                                             Icons.visibility_outlined,
-                                            comic.formattedViews,
+                                            engagement == null
+                                                ? (engagementAsync.isLoading
+                                                      ? '…'
+                                                      : '—')
+                                                : '${engagement.readerCount}',
                                             AppColors.textSecondary,
                                           ),
                                           const SizedBox(width: 12),
                                           _statChip(
                                             Icons.bookmark_outline_rounded,
-                                            comic.formattedBookmarks,
+                                            engagement == null
+                                                ? (engagementAsync.isLoading
+                                                      ? '…'
+                                                      : '—')
+                                                : '${engagement.bookmarkCount}',
                                             AppColors.textSecondary,
                                           ),
                                         ],
@@ -716,6 +833,11 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                                             coverUrl: comic.coverUrl,
                                           );
                                         }
+                                        ref.invalidate(
+                                          comicEngagementProvider(
+                                            widget.comicId,
+                                          ),
+                                        );
                                         if (!context.mounted) return;
                                         ScaffoldMessenger.of(context)
                                           ..hideCurrentSnackBar()
@@ -865,9 +987,8 @@ class _ComicDetailScreenState extends ConsumerState<ComicDetailScreen> {
                             Expanded(
                               child: LayoutBuilder(
                                 builder: (context, constraints) {
-                                  final synopsis = _isMissingSynopsis(
-                                    comic.synopsis,
-                                  )
+                                  final synopsis =
+                                      _isMissingSynopsis(comic.synopsis)
                                       ? 'Belum ada sinopsis.'
                                       : comic.synopsis;
                                   final style = TextStyle(

@@ -44,6 +44,12 @@ memakai **email dan password**. Untuk menutup fungsi pencarian email dari
 username yang lama, jalankan [SQL keamanan P8](supabase_security_p8.sql)
 sekali pada proyek Supabase yang sama.
 
+Rating komik 1–10, jumlah bookmark global, dan jumlah pembaca menggunakan
+fungsi/tabel di [SQL engagement komik](supabase_comic_engagement.sql). Jalankan
+skrip tersebut sekali melalui Supabase SQL Editor setelah setup statistik
+pembaca mingguan tersedia. Rating disimpan per akun; bookmark dan pembaca hanya
+ditampilkan sebagai angka agregat.
+
 ## APK Release dan log saat aplikasi berjalan (P11)
 
 Untuk demo di HP, siapkan APK **Release** dengan skrip PowerShell ini dari root

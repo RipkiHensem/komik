@@ -138,6 +138,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       if (sent) {
         _readRecorded = true;
         ref.invalidate(popularComicsByFormatProvider);
+        ref.invalidate(comicEngagementProvider(comic.id));
       }
     });
   }

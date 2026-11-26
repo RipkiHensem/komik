@@ -15,7 +15,9 @@ import '../services/api_service.dart';
 import '../services/shinigami_api_service.dart';
 import '../services/auth_service.dart';
 import '../repositories/comic_caption_repository.dart';
+import '../repositories/comic_engagement_repository.dart';
 import '../repositories/popular_repository.dart';
+import '../models/comic_engagement.dart';
 import '../../core/services/app_logger.dart';
 
 // ── Service Providers ───────────────────────────────────────
@@ -35,6 +37,16 @@ final supabaseComicServiceProvider = Provider<SupabaseComicService>(
 final comicCaptionRepositoryProvider = Provider<ComicCaptionRepository>(
   (ref) => ComicCaptionRepository(Supabase.instance.client),
 );
+final comicEngagementRepositoryProvider = Provider<ComicEngagementRepository>(
+  (ref) => ComicEngagementRepository(Supabase.instance.client),
+);
+final comicEngagementProvider = FutureProvider.family<ComicEngagement, String>((
+  ref,
+  comicId,
+) {
+  ref.watch(authProvider.select((state) => state.user?.id));
+  return ref.read(comicEngagementRepositoryProvider).load(comicId);
+});
 final supabaseAuthServiceProvider = Provider<SupabaseAuthService>(
   (ref) => SupabaseAuthService(),
 );
